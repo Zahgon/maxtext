@@ -582,6 +582,7 @@ def load_state_if_possible(
     checkpoint_conversion_fn=None,
     source_checkpoint_layout="orbax",
     expansion_factor_real_data: int = -1,
+    maxtext_config: Any | None = None,
 ):
   """Loads TrainState as possible from the inputs.
 
@@ -684,7 +685,16 @@ def load_state_if_possible(
         case _:
           return (checkpoint_manager.restore(step, args=Composite(items=checkpoint_args)), None)
 
-  if load_parameters_from_path != "":
+  if source_checkpoint_layout == "safetensors_dynamic":
+    path = load_parameters_from_path or load_full_state_from_path
+    max_logging.log(f"Dynamic On-the-Fly Formatting: Loading SafeTensors from {path}")
+    
+    from maxtext.checkpoint_conversion.utils.load_dynamic import load_safetensors_dynamic_state
+    
+    return load_safetensors_dynamic_state(
+        path, abstract_unboxed_pre_state, maxtext_config
+    )
+  elif load_parameters_from_path != "":
     if isinstance(abstract_unboxed_pre_state, nnx.State):
       _, params, _ = nnx.split(abstract_unboxed_pre_state.model, nnx.Param, ...)
     else:
@@ -696,6 +706,9 @@ def load_state_if_possible(
         checkpoint_storage_concurrent_gb,
         use_ocdbt=use_ocdbt,
         use_zarr3=use_zarr3,
+        enable_orbax_v1=enable_orbax_v1,
+        source_checkpoint_layout=source_checkpoint_layout,
+        checkpoint_conversion_fn=checkpoint_conversion_fn,
     )
     return None, restored_params
   elif load_full_state_from_path != "":
@@ -736,35 +749,68 @@ def setup_checkpoint_logger(config) -> Any | None:  # pytype: disable=attribute-
 
 
 def load_params_from_path(
-    load_parameters_from_path, abstract_unboxed_params, checkpoint_storage_concurrent_gb, use_ocdbt=True, use_zarr3=True
+    load_parameters_from_path,
+    abstract_unboxed_params,
+    checkpoint_storage_concurrent_gb,
+    use_ocdbt=True,
+    use_zarr3=True,
+    enable_orbax_v1=False,
+    source_checkpoint_layout="orbax",
+    checkpoint_conversion_fn=None,
 ):
   """Load decode params from checkpoint at specified path."""
   assert load_parameters_from_path, "load_parameters_from_path is not defined."
   max_logging.log(f"restoring params from {load_parameters_from_path}")
 
-  # *_concurrent_gb should be set for large models, the default is 96.
-  max_logging.log(f"Creating checkpoint manager with ocdbt={use_ocdbt} and zarr3={use_zarr3}")
-  ckptr = ocp.Checkpointer(
-      ocp.PyTreeCheckpointHandler(
-          restore_concurrent_gb=checkpoint_storage_concurrent_gb,
-          save_concurrent_gb=checkpoint_storage_concurrent_gb,
-          use_ocdbt=use_ocdbt,
-          use_zarr3=use_zarr3,
-      )
-  )
+  if enable_orbax_v1:
+    if source_checkpoint_layout == "orbax":
+      context = ocp_v1.Context(checkpoint_layout=ocp_v1.options.CheckpointLayout.ORBAX)
+      with context:
+        restored = ocp_v1.load_pytree(load_parameters_from_path, {"params": abstract_unboxed_params})
+        return restored["params"]
+    elif source_checkpoint_layout == "safetensors":
+      context = ocp_v1.Context(checkpoint_layout=ocp_v1.options.CheckpointLayout.SAFETENSORS)
+      with context:
+        metadata = ocp_v1.pytree_metadata(load_parameters_from_path)
+        simple_abstract_state = metadata.metadata
+        shardings = sharding_utils.construct_maximal_shardings(simple_abstract_state)
 
-  # This is a memory optimization. We don't want to restore the entire checkpoint - only the params.
-  # Rather than pass the entire abstract state, which could unnecessarily restore opt_state and such and waste
-  # memory, we instead specify here that we are just restoring the params field of the checkpoint
-  # (which itself may be a dictionary containing a key named 'params').
-  restore_args = ocp.checkpoint_utils.construct_restore_args(abstract_unboxed_params)
-  restored = ckptr.restore(
-      epath.Path(load_parameters_from_path),
-      item={"params": abstract_unboxed_params},
-      transforms={},
-      restore_args={"params": restore_args},
-  )
-  return restored["params"]
+        def combine_sharding(sds, shardings):
+          return jax.ShapeDtypeStruct(shape=sds.shape, dtype=sds.dtype, sharding=shardings)
+
+        sharded_abstract_state = jax.tree.map(combine_sharding, simple_abstract_state, shardings)
+        pre_transformed_state = ocp_v1.load_pytree(load_parameters_from_path, sharded_abstract_state)
+      if checkpoint_conversion_fn:
+        pre_transformed_state = checkpoint_conversion_fn(pre_transformed_state)
+      if "params" in pre_transformed_state:
+        return pre_transformed_state["params"]
+      return pre_transformed_state
+    else:
+      raise ocp_v1.errors.InvalidLayoutError(f"Unknown checkpoint layout: {source_checkpoint_layout}")
+  else:
+    # *_concurrent_gb should be set for large models, the default is 96.
+    max_logging.log(f"Creating checkpoint manager with ocdbt={use_ocdbt} and zarr3={use_zarr3}")
+    ckptr = ocp.Checkpointer(
+        ocp.PyTreeCheckpointHandler(
+            restore_concurrent_gb=checkpoint_storage_concurrent_gb,
+            save_concurrent_gb=checkpoint_storage_concurrent_gb,
+            use_ocdbt=use_ocdbt,
+            use_zarr3=use_zarr3,
+        )
+    )
+
+    # This is a memory optimization. We don't want to restore the entire checkpoint - only the params.
+    # Rather than pass the entire abstract state, which could unnecessarily restore opt_state and such and waste
+    # memory, we instead specify here that we are just restoring the params field of the checkpoint
+    # (which itself may be a dictionary containing a key named 'params').
+    restore_args = ocp.checkpoint_utils.construct_restore_args(abstract_unboxed_params)
+    restored = ckptr.restore(
+        epath.Path(load_parameters_from_path),
+        item={"params": abstract_unboxed_params},
+        transforms={},
+        restore_args={"params": restore_args},
+    )
+    return restored["params"]
 
 
 def save_params_to_path(checkpoint_dir, params, use_ocdbt=True, use_zarr3=True):
