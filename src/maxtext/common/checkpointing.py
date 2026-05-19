@@ -735,12 +735,135 @@ def setup_checkpoint_logger(config) -> Any | None:  # pytype: disable=attribute-
   return orbax_cloud_logger
 
 
+# Linen and NNX save full-state checkpoints with different top-level layouts:
+#   Linen: {params: {params: <weights>}, step, opt_state, ...}
+#   NNX:   {model: <weights + rngs/dropout/...>, optimizer: {step, opt_state}}
+# The helpers below let `load_params_from_path` read either layout into either
+# target framework. `load_full_state_path` is out of scope -- optax state
+# differs in ways that don't 1:1 translate across frameworks.
+
+
+def _peek_on_disk_tree(path, use_ocdbt, use_zarr3):
+  """Reads the on-disk pytree metadata at `path`."""
+  ckptr = ocp.Checkpointer(ocp.PyTreeCheckpointHandler(use_ocdbt=use_ocdbt, use_zarr3=use_zarr3))
+  metadata = ckptr.metadata(epath.Path(path))
+  if hasattr(metadata, "item_metadata") and hasattr(metadata.item_metadata, "tree"):
+    return metadata.item_metadata.tree
+  if hasattr(metadata, "tree"):
+    return metadata.tree
+  return metadata
+
+
+def _is_nnx_format_on_disk(path, use_ocdbt, use_zarr3):
+  """Returns True if the on-disk top-level has a `model` key (NNX layout)."""
+  try:
+    tree = _peek_on_disk_tree(path, use_ocdbt, use_zarr3)
+    return isinstance(tree, dict) and "model" in tree
+  except Exception as e:  # pylint: disable=broad-except
+    max_logging.log(f"Could not peek checkpoint metadata at {path}, assuming non-NNX format. Error: {e}")
+    return False
+
+
+def _rebuild_nnx_with_values(abstract_nnx_state, concrete_weights):
+  """Fills each Variable in `abstract_nnx_state` with the matching restored array."""
+  abstract_leaves, treedef = jax.tree_util.tree_flatten(abstract_nnx_state, is_leaf=lambda x: isinstance(x, nnx.Variable))
+  concrete_leaves = jax.tree_util.tree_leaves(concrete_weights)
+  if len(abstract_leaves) != len(concrete_leaves):
+    raise ValueError(
+        f"Params adapter leaf-count mismatch: {len(abstract_leaves)} abstract Variables "
+        f"vs {len(concrete_leaves)} restored arrays."
+    )
+  new_leaves = [
+      var.replace(value=arr) if isinstance(var, nnx.Variable) else arr
+      for var, arr in zip(abstract_leaves, concrete_leaves)
+  ]
+  return jax.tree_util.tree_unflatten(treedef, new_leaves)
+
+
+def _adapt_params_load(path, abstract, on_disk_is_nnx, checkpoint_storage_concurrent_gb, use_ocdbt, use_zarr3):
+  """Loads params across Linen and NNX layouts.
+
+  Used for three cases; Linen disk -> Linen target stays on the original Orbax
+  path and doesn't reach here.
+
+  Args:
+    path: GCS or local checkpoint directory.
+    abstract: Target params abstract -- an `nnx.State` for NNX, or a
+      `{params: <weights>}` dict for Linen.
+    on_disk_is_nnx: True if disk has `model/...`, False for `params/params/...`.
+    checkpoint_storage_concurrent_gb: Concurrent GB for byte I/O.
+    use_ocdbt: Whether to use OCDBT format.
+    use_zarr3: Whether to use Zarr3 format.
+
+  Returns:
+    Restored params shaped like `abstract`.
+  """
+  is_nnx_target = isinstance(abstract, nnx.State)
+  max_logging.log(
+      f"Adapting {'NNX' if on_disk_is_nnx else 'Linen'}-shape params -> "
+      f"{'NNX' if is_nnx_target else 'Linen'} target at {path}"
+  )
+
+  if is_nnx_target:
+    # nnx.State.to_pure_dict() yields bare arrays (no {value: ...} boxing), matching
+    # the on-disk layout the save path writes via the same call.
+    inner_weights_abstract = abstract.to_pure_dict()
+  else:
+    # Linen wraps its weights in a `params` collection key.
+    inner_weights_abstract = abstract["params"] if isinstance(abstract, dict) and "params" in abstract else abstract
+
+  if on_disk_is_nnx:
+    restore_target = {"model": inner_weights_abstract}
+  else:
+    restore_target = {"params": {"params": inner_weights_abstract}}
+
+  ckptr = ocp.Checkpointer(
+      ocp.PyTreeCheckpointHandler(
+          restore_concurrent_gb=checkpoint_storage_concurrent_gb,
+          save_concurrent_gb=checkpoint_storage_concurrent_gb,
+          use_ocdbt=use_ocdbt,
+          use_zarr3=use_zarr3,
+      )
+  )
+  restore_args = ocp.checkpoint_utils.construct_restore_args(restore_target)
+  restored = ckptr.restore(
+      epath.Path(path),
+      args=ocp.args.PyTreeRestore(
+          item=restore_target,
+          restore_args=restore_args,
+          partial_restore=True,
+      ),
+  )
+  restored_weights = restored["model"] if on_disk_is_nnx else restored["params"]["params"]
+
+  if is_nnx_target:
+    return _rebuild_nnx_with_values(abstract, restored_weights)
+  return {"params": restored_weights}
+
+
 def load_params_from_path(
     load_parameters_from_path, abstract_unboxed_params, checkpoint_storage_concurrent_gb, use_ocdbt=True, use_zarr3=True
 ):
-  """Load decode params from checkpoint at specified path."""
+  """Loads decode params from a checkpoint at the given path.
+
+  Routes through `_adapt_params_load` if the target abstract is NNX or the
+  on-disk layout is NNX `model/...`. Linen -> Linen falls through to the
+  original Orbax restore.
+  """
   assert load_parameters_from_path, "load_parameters_from_path is not defined."
   max_logging.log(f"restoring params from {load_parameters_from_path}")
+
+  is_nnx_target = isinstance(abstract_unboxed_params, nnx.State)
+  on_disk_is_nnx = _is_nnx_format_on_disk(load_parameters_from_path, use_ocdbt, use_zarr3)
+  if is_nnx_target or on_disk_is_nnx:
+    return _adapt_params_load(
+        load_parameters_from_path,
+        abstract_unboxed_params,
+        on_disk_is_nnx,
+        checkpoint_storage_concurrent_gb,
+        use_ocdbt,
+        use_zarr3,
+    )
 
   # *_concurrent_gb should be set for large models, the default is 96.
   max_logging.log(f"Creating checkpoint manager with ocdbt={use_ocdbt} and zarr3={use_zarr3}")
