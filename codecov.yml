@@ -38,6 +38,9 @@ ignore:
   - "src/maxtext/experimental"
   - "src/maxtext/inference"
   - "src/maxtext/scratch_code"
+  # Exclude low-level hardware-bound SparseCore TPU kernels that cannot run on CPU-only CI runners
+  - "src/maxtext/kernels/gather_reduce_pallas.py"
+  - "src/maxtext/kernels/gather_reduce_sc.py"
 
 flags:
   # Updated ONLY by PRs (contains subset of tests, excluding scheduled_only).

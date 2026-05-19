@@ -39,6 +39,7 @@ def sc_gather_reduce(
     col_chunk_size: int = int(3.5 * 1024),
     row_chunk_size: int = 512,
     topk_wgt_zero_nan: bool = False,
+    enable_clipping: bool = True,
 ) -> jax.Array:
   """Performs a gather-reduce operation on SparseCore.
 
@@ -67,10 +68,13 @@ def sc_gather_reduce(
       * reduce_group_size``.
     topk_wgt_zero_nan: If True, treat zero ``topk_weights`` as indicators of NaN
       during multiplication, resulting in zero output.
+    enable_clipping: If True, clip gather indices to valid bounds to prevent OOB.
 
   Returns:
     The reduced result as a bf16 matrix [M / reduce_group_size, K].
   """
+  if enable_clipping:
+    idx = jnp.clip(idx, 0, op.shape[0] - 1)
   if op.dtype != jnp.bfloat16:
     raise ValueError(f"op.dtype must be f32 or bf16, but got {op.dtype}")
   if op.shape[0] % reduce_group_size != 0:
@@ -84,8 +88,13 @@ def sc_gather_reduce(
   _, K = op.shape
   M_out = M // reduce_group_size
 
+  if K % col_chunk_size != 0:
+    raise ValueError(f"K ({K}) must be perfectly divisible by col_chunk_size ({col_chunk_size}).")
+
   if topk_weights is not None:
     topk_weights = topk_weights.flatten()
+    if topk_weights.size != M:
+      raise ValueError(f"Weights size ({topk_weights.size}) must equal M ({M}).")
 
   @jax.jit
   @pl.kernel(

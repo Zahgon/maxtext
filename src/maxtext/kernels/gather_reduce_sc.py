@@ -67,6 +67,7 @@ _BF16 = VectorTypeHelper(ir.BF16Type.get)
         "loop_parallel_access_2",
         "loop_parallel_access_3",
         "topk_wgt_zero_nan",
+        "enable_clipping",
     ],
 )
 def sc_gather_reduce(
@@ -85,6 +86,7 @@ def sc_gather_reduce(
     loop_parallel_access_2: bool = False,
     loop_parallel_access_3: bool = False,
     topk_wgt_zero_nan: bool = False,
+    enable_clipping: bool = True,
 ) -> jax.Array:
   """Performs a gather-reduce operation on SparseCore.
 
@@ -123,10 +125,17 @@ def sc_gather_reduce(
       offset calculation.
     topk_wgt_zero_nan: If true, treat zero topk_weights as indicators of NaN
       during multiplication, resulting in zero output.
+    enable_clipping: If true, clip gather indices to valid bounds to prevent OOB.
 
   Returns:
     The result of operation, bf16 matrix [M/reduce_group_size, K].
   """
+
+  assert (
+      op.shape[1] % col_chunk_size == 0
+  ), f"op.shape[1] ({op.shape[1]}) must be perfectly divisible by col_chunk_size ({col_chunk_size})"
+  if enable_clipping:
+    idx = jnp.clip(idx, 0, op.shape[0] - 1)
 
   assert op.dtype in (
       jnp.float32,
@@ -152,6 +161,10 @@ def sc_gather_reduce(
   used_sc_cores = 1 if single_sc else 2
   num_sc_per_core = tpu_info.sparse_core.num_subcores
   num_sc = num_sc_per_core * used_sc_cores
+
+  assert idx.shape[0] >= (
+      num_sc * row_chunk_size * 2
+  ), f"idx.shape[0] must be at least {num_sc * row_chunk_size * 2}, but got {idx.shape[0]}"
 
   vreg_size = tpu_info.sparse_core.num_lanes
 
@@ -237,7 +250,7 @@ def sc_gather_reduce(
         )
         loop_over_idx = scf.ForOp(
             lower_bound=const_lut(0),
-            upper_bound=const_lut(row_chunk_size + 1),
+            upper_bound=const_lut(row_chunk_size),
             step=const_lut(1),
         )
         loop_over_idx.attributes["sc.loop_unroll_factor"] = ir.IntegerAttr.get(i32, loop_unroll_factor_2)
