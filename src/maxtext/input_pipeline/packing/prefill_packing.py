@@ -14,21 +14,14 @@
 
 """Implementation of Prefill Packing feature"""
 
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from maxtext.common.gcloud_stub import jetstream, is_decoupled
-from maxtext.inference.maxengine.maxengine import MaxEngine
-
-config_lib, engine_api, token_utils, tokenizer_api, token_params_ns = jetstream()
-
-jetstream_is_stub = getattr(config_lib, "_IS_STUB", False) or getattr(engine_api, "_IS_STUB", False)
-
-if is_decoupled() and jetstream_is_stub:
-  raise RuntimeError("prefill_packing imported while DECOUPLE_GCLOUD=TRUE. This module depends on JetStream.")
+if TYPE_CHECKING:
+  from maxtext.inference.maxengine.maxengine import MaxEngine
 
 import warnings
 import logging
@@ -104,14 +97,14 @@ class PrefillBucket:
 class PrefillProcessor:
   """A wrapper around MaxEngine prefill and insert API."""
 
-  def __init__(self, engine: MaxEngine):
+  def __init__(self, engine: "MaxEngine"):
     self.engine = engine
     self.process_func = {}
 
   def aot_compile(self, params: Params, input_padding: int):
     """Ahead-of-time compile prefill processing routines."""
-
-    return self._process_compiled(params, input_padding)
+    is_paged = self.engine.config.attention == "paged"
+    return self._process_compiled(params, input_padding, is_paged=is_paged)
 
   def process(
       self,
@@ -122,42 +115,109 @@ class PrefillProcessor:
       input_true_length: int,
       rng: PRNGKeyType,
       return_prompt_logp: bool = False,
-  ) -> tuple[Any, DecodeState]:
+      page_state: Any | None = None,
+  ) -> tuple[Any, DecodeState, Any | None]:
     """Process a new input."""
+    is_paged = self.engine.config.attention == "paged"
+    process_fn = self._process_compiled(model_params, len(input_tokens_padded), return_prompt_logp, is_paged=is_paged)
+    if is_paged:
+      assert page_state is not None
+      return process_fn(
+          model_params,
+          input_tokens_padded,
+          decode_slot,
+          input_true_length,
+          decode_state,
+          rng,
+          page_state,
+      )
+    else:
+      first_token, decode_state, _ = process_fn(
+          model_params,
+          input_tokens_padded,
+          decode_slot,
+          input_true_length,
+          decode_state,
+          rng,
+          None,
+      )
+      return first_token, decode_state, None
 
-    process_fn = self._process_compiled(model_params, len(input_tokens_padded), return_prompt_logp)
-    return process_fn(
-        model_params, input_tokens_padded, decode_slot, input_true_length, decode_state, rng, return_prompt_logp
-    )
-
-  def _process_compiled(self, params: Params, padded_length: int, return_prompt_logp: bool = False):
+  def _process_compiled(
+      self, params: Params, padded_length: int, return_prompt_logp: bool = False, is_paged: bool = False
+  ):
     """Ahead-of-time compilation wrapper of _process()."""
 
-    if padded_length not in self.process_func:
-      log.info("compile prefill process(%d)", padded_length)
-      self.process_func[(padded_length, return_prompt_logp)] = (
-          jax.jit(
-              self._process,
-              in_shardings=(self.engine.param_layouts, None, None, None, self.engine.decode_state_layouts, None),
-              out_shardings=(
-                  None,
-                  self.engine.decode_state_layouts,
-              ),
-              donate_argnames=("decode_state"),
-              static_argnames=("return_prompt_logp",),
-          )
-          .lower(
-              params,
-              jax.ShapeDtypeStruct((padded_length,), jnp.dtype("int32")),
-              jax.ShapeDtypeStruct((), int),
-              jax.ShapeDtypeStruct((), int),
-              self.engine.decode_state_shapes,
-              jax.ShapeDtypeStruct([4], jax.numpy.dtype("uint32")),
-              return_prompt_logp,
-          )
-          .compile(compiler_options=None)
-      )
-    return self.process_func[(padded_length, return_prompt_logp)]
+    if (padded_length, return_prompt_logp, is_paged) not in self.process_func:
+      log.info("compile prefill process(%d) is_paged=%s", padded_length, is_paged)
+      if is_paged:
+        page_state_shape = jax.eval_shape(self.engine.page_manager.get_initial_page_state)
+        self.process_func[(padded_length, return_prompt_logp, is_paged)] = (
+            jax.jit(
+                self._process,
+                in_shardings=(
+                    self.engine.param_layouts,
+                    None,
+                    None,
+                    None,
+                    self.engine.decode_state_layouts,
+                    None,
+                    None,
+                ),
+                out_shardings=(
+                    None,
+                    self.engine.decode_state_layouts,
+                    None,
+                ),
+                donate_argnames=("decode_state", "page_state"),
+                static_argnames=("return_prompt_logp",),
+            )
+            .lower(
+                params,
+                jax.ShapeDtypeStruct((padded_length,), jnp.dtype("int32")),
+                jax.ShapeDtypeStruct((), int),
+                jax.ShapeDtypeStruct((), int),
+                self.engine.decode_state_shapes,
+                jax.ShapeDtypeStruct([4], jax.numpy.dtype("uint32")),
+                page_state_shape,
+                return_prompt_logp,
+            )
+            .compile(compiler_options=None)
+        )
+      else:
+        self.process_func[(padded_length, return_prompt_logp, is_paged)] = (
+            jax.jit(
+                self._process,
+                in_shardings=(
+                    self.engine.param_layouts,
+                    None,
+                    None,
+                    None,
+                    self.engine.decode_state_layouts,
+                    None,
+                    None,
+                ),
+                out_shardings=(
+                    None,
+                    self.engine.decode_state_layouts,
+                    None,
+                ),
+                donate_argnames=("decode_state",),
+                static_argnames=("return_prompt_logp",),
+            )
+            .lower(
+                params,
+                jax.ShapeDtypeStruct((padded_length,), jnp.dtype("int32")),
+                jax.ShapeDtypeStruct((), int),
+                jax.ShapeDtypeStruct((), int),
+                self.engine.decode_state_shapes,
+                jax.ShapeDtypeStruct([4], jax.numpy.dtype("uint32")),
+                None,
+                return_prompt_logp,
+            )
+            .compile(compiler_options=None)
+        )
+    return self.process_func[(padded_length, return_prompt_logp, is_paged)]
 
   def _process(
       self,
@@ -167,23 +227,54 @@ class PrefillProcessor:
       true_length: int,
       decode_state: DecodeState,
       rng: PRNGKeyType,
+      page_state: Any | None = None,
       return_prompt_logp: bool = False,
-  ) -> tuple[Any, DecodeState]:
+  ) -> tuple[Any, DecodeState, Any | None]:
     """Prefill and insert a request."""
+    if self.engine.config.attention == "paged":
+      assert page_state is not None
+      page_state = self.engine.page_manager.update_prefill_pages(
+          page_state=page_state,
+          page_group_id=slot,
+          true_length=true_length,
+      )
+      # pylint: disable=protected-access
+      prefill_result, first_token = self.engine._prefill_jit(
+          params=params,
+          padded_tokens=tokens,
+          true_length=true_length,
+          rng=rng,
+          page_state=page_state,
+          slot=slot,
+          return_prompt_logp=return_prompt_logp,
+      )
+      decode_state = self.engine._insert_jit(
+          prefix=prefill_result,
+          decode_state=decode_state,
+          slot=slot,
+          page_state_in=page_state,
+      )
+      # pylint: enable=protected-access
+      new_has_active_page = page_state.has_active_page.at[slot].set(True)
+      page_state = page_state.replace(has_active_page=new_has_active_page)
 
-    prefill_result, first_token = self.engine.prefill(
-        params=params, padded_tokens=tokens, true_length=true_length, rng=rng, return_prompt_logp=return_prompt_logp
-    )
-    decode_state = self.engine.insert(prefill_result, decode_state, slot)
-    if return_prompt_logp:
-      decode_state["prompt_logp"] = prefill_result["prompt_logp"]
-    return first_token, decode_state
+      if return_prompt_logp:
+        decode_state["prompt_logp"] = prefill_result["prompt_logp"]
+      return first_token, decode_state, page_state
+    else:
+      prefill_result, first_token = self.engine.prefill(
+          params=params, padded_tokens=tokens, true_length=true_length, rng=rng, return_prompt_logp=return_prompt_logp
+      )
+      decode_state = self.engine.insert(prefill_result, decode_state, slot)
+      if return_prompt_logp:
+        decode_state["prompt_logp"] = prefill_result["prompt_logp"]
+      return first_token, decode_state, None
 
 
 class BatchedPrefillProcessor:
   """A wrapper around the APIs used by MaxEngine to do prefill and insert, provides prefill packing feature."""
 
-  def __init__(self, engine: MaxEngine, max_batch_size: int, auto_layout_supported: bool = True):
+  def __init__(self, engine: "MaxEngine", max_batch_size: int, auto_layout_supported: bool = True):
     self.engine = engine
     self.process_batch_func = {}
     self.buckets = {}
@@ -321,7 +412,7 @@ class BatchedPrefillProcessor:
           model_params, input_padding, bucket.capacity, bucket.count, return_prompt_logp
       )
       first_tokens, decode_state = prefill_fn(
-          model_params, tok_ids, slots, pos_ids, seg_ids, offsets_jax, lengths_jax, decode_state, return_prompt_logp
+          model_params, tok_ids, slots, pos_ids, seg_ids, offsets_jax, lengths_jax, decode_state
       )
 
     prefill_result = []

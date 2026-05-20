@@ -39,7 +39,17 @@ _FLATTEN_MICROBENCHMARK_RESULTS = False
 # pylint: disable=too-many-positional-arguments
 
 
-def prefill_benchmark_loop(engine_prefill, params, tokens, true_length, iters, num_samples: int | None = None):
+def prefill_benchmark_loop(
+    engine_prefill,
+    params,
+    tokens,
+    true_length,
+    iters,
+    num_samples: int | None = None,
+    page_state=None,
+    slot=None,
+    config=None,
+):
   """Inner loop for benchmarking prefill step."""
   start = datetime.datetime.now()
   rng = jax.random.PRNGKey(1234)
@@ -47,7 +57,10 @@ def prefill_benchmark_loop(engine_prefill, params, tokens, true_length, iters, n
   for _ in range(iters):
     rng, rng_prefill = jax.random.split(rng)
     if num_samples is None:
-      prefill_result, _ = engine_prefill(params, tokens, true_length, rng_prefill)
+      if config is not None and config.attention == "paged" and page_state is not None:
+        prefill_result, _, page_state = engine_prefill(params, tokens, true_length, rng_prefill, page_state, slot)
+      else:
+        prefill_result, _ = engine_prefill(params, tokens, true_length, rng_prefill)
     else:
       prefill_result, _ = engine_prefill[num_samples](params, tokens, true_length, rng_prefill, None)
   jax.block_until_ready(prefill_result)
@@ -56,18 +69,25 @@ def prefill_benchmark_loop(engine_prefill, params, tokens, true_length, iters, n
   return (end - start).total_seconds()
 
 
-def prefill_benchmark(config, engine_prefill, params, tokens, true_length, num_model_params, iters):
+def prefill_benchmark(
+    config, engine_prefill, params, tokens, true_length, num_model_params, iters, page_state=None, slot=None
+):
   """Handles warmup, running prefill benchmark, and printing results."""
   rng = jax.random.PRNGKey(1234)
   prefill_result = None
   for _ in range(_WARMUP_ITERS):
     rng, rng_prefill = jax.random.split(rng)
-    prefill_result, _ = engine_prefill(params, tokens, true_length, rng_prefill)
+    if config.attention == "paged" and page_state is not None:
+      prefill_result, _, page_state = engine_prefill(params, tokens, true_length, rng_prefill, page_state, slot)
+    else:
+      prefill_result, _ = engine_prefill(params, tokens, true_length, rng_prefill)
   jax.block_until_ready(prefill_result)
   del prefill_result
 
   print(f"Prefill benchmark results for length {tokens.size}:\n")
-  time_in_s = prefill_benchmark_loop(engine_prefill, params, tokens, true_length, iters)
+  time_in_s = prefill_benchmark_loop(
+      engine_prefill, params, tokens, true_length, iters, page_state=page_state, slot=slot, config=config
+  )
   prefill_average_ms = 1000 * time_in_s / iters
   prefill_tflops_per_device, _, _ = maxtext_utils.calculate_prefill_tflops_per_device(
       num_model_params, tokens.size, config
@@ -113,7 +133,7 @@ def prefill_multisampling_benchmark(config, engine_prefill_multisampling, params
 
 
 def prefill_insert_benchmark_loop(
-    config, engine_insert, decode_state, params, total_slots, tokens, true_length, iters, profile_name
+    config, engine_insert, decode_state, params, total_slots, tokens, true_length, iters, profile_name, page_state=None
 ):
   """Inner loop for benchmarking prefill and insert step."""
   prof = profiler.Profiler(config)
@@ -122,23 +142,41 @@ def prefill_insert_benchmark_loop(
   rng = jax.random.PRNGKey(1234)
   rng, _ = jax.random.split(rng)
   for i in range(iters):
-    _, decode_state = engine_insert(params, tokens, int(i % total_slots), true_length, decode_state, rng)
+    rng, rng_insert = jax.random.split(rng)
+    if config.attention == "paged" and page_state is not None:
+      _, decode_state, page_state = engine_insert(
+          params, tokens, int(i % total_slots), true_length, decode_state, rng_insert, page_state
+      )
+    else:
+      _, decode_state, _ = engine_insert(
+          params, tokens, int(i % total_slots), true_length, decode_state, rng_insert, None
+      )
   jax.block_until_ready(decode_state)
   end = datetime.datetime.now()
   prof.deactivate()
-  return (end - start).total_seconds(), decode_state
+  return (end - start).total_seconds(), decode_state, page_state
 
 
-def prefill_insert_benchmark(config, engine_insert, decode_state, params, total_slots, tokens, true_length, iters):
+def prefill_insert_benchmark(
+    config, engine_insert, decode_state, params, total_slots, tokens, true_length, iters, page_state=None
+):
   """Handles warmup, running insert benchmark, and printing results."""
   rng = jax.random.PRNGKey(1234)
   rng, _ = jax.random.split(rng)
   for i in range(_WARMUP_ITERS):
-    _, decode_state = engine_insert(params, tokens, int(i % total_slots), true_length, decode_state, rng)
+    rng, rng_insert = jax.random.split(rng)
+    if config.attention == "paged" and page_state is not None:
+      _, decode_state, page_state = engine_insert(
+          params, tokens, int(i % total_slots), true_length, decode_state, rng_insert, page_state
+      )
+    else:
+      _, decode_state, _ = engine_insert(
+          params, tokens, int(i % total_slots), true_length, decode_state, rng_insert, None
+      )
   jax.block_until_ready(decode_state)
 
   print(f"Prefill and insert benchmark results for length {tokens.size}:\n")
-  time_in_s, decode_state = prefill_insert_benchmark_loop(
+  time_in_s, decode_state, page_state = prefill_insert_benchmark_loop(
       config,
       engine_insert,
       decode_state,
@@ -148,14 +186,15 @@ def prefill_insert_benchmark(config, engine_insert, decode_state, params, total_
       true_length,
       iters,
       f"prefill_insert_{tokens.size}",
+      page_state=page_state,
   )
   prefill_insert_average_ms = time_in_s / iters * 1000.0
   print(f"\tPrefill + Insert step average time: {prefill_insert_average_ms:.3f} ms\n\n\n\n")
   result_dict = {"time_in_ms": prefill_insert_average_ms}
-  return result_dict, decode_state
+  return result_dict, decode_state, page_state
 
 
-def ar_benchmark_loop(config, engine_generate, params, decode_state, iters, profile_name):
+def ar_benchmark_loop(config, engine_generate, params, decode_state, iters, profile_name, page_state=None):
   """Inner loop for benchmarking ar step."""
   prof = profiler.Profiler(config)
   prof.activate(optional_postfix=profile_name)
@@ -163,23 +202,31 @@ def ar_benchmark_loop(config, engine_generate, params, decode_state, iters, prof
   rng = jax.random.PRNGKey(1234)
   for _ in range(iters):
     rng, rng_generate = jax.random.split(rng)
-    decode_state, _ = engine_generate(params, decode_state, rng_generate)
+    if config.attention == "paged" and page_state is not None:
+      decode_state, _, page_state = engine_generate(params, decode_state, rng_generate, page_state)
+    else:
+      decode_state, _ = engine_generate(params, decode_state, rng_generate)
   jax.block_until_ready(decode_state)
   end = datetime.datetime.now()
   prof.deactivate()
-  return (end - start).total_seconds(), decode_state
+  return (end - start).total_seconds(), decode_state, page_state
 
 
-def ar_benchmark(config, engine_generate, params, decode_state, global_batch_size, cache_size, model_size, iters):
+def ar_benchmark(
+    config, engine_generate, params, decode_state, global_batch_size, cache_size, model_size, iters, page_state=None
+):
   """Handles warmup, running ar benchmark, and printing results."""
   rng = jax.random.PRNGKey(1234)
   for _ in range(_WARMUP_ITERS):
     rng, rng_generate = jax.random.split(rng)
-    decode_state, _ = engine_generate(params, decode_state, rng_generate)
+    if config.attention == "paged" and page_state is not None:
+      decode_state, _, page_state = engine_generate(params, decode_state, rng_generate, page_state)
+    else:
+      decode_state, _ = engine_generate(params, decode_state, rng_generate)
   jax.block_until_ready(decode_state)
 
-  time_in_s, decode_state = ar_benchmark_loop(
-      config, engine_generate, params, decode_state, iters, profile_name="autoregress"
+  time_in_s, decode_state, page_state = ar_benchmark_loop(
+      config, engine_generate, params, decode_state, iters, profile_name="autoregress", page_state=page_state
   )
   seconds_per_step = time_in_s / iters
   ar_average_ms = seconds_per_step * 1000
@@ -331,6 +378,10 @@ def run_benchmarks(config):
     i32_scalar = jax.ShapeDtypeStruct((), int)
     rng_shape = jax.ShapeDtypeStruct([4], jax.numpy.dtype("uint32"))
 
+    page_state = None
+    if config.attention == "paged":
+      page_state = engine.page_state
+
     for prefill_length in prefill_lengths:
       is_bos = tokenizer_model.bos_id is not None
       prefill_tokens[prefill_length], prefill_true_lengths[prefill_length] = tokenizer_model.encode(
@@ -338,18 +389,34 @@ def run_benchmarks(config):
       )
 
       key_shape = jax.ShapeDtypeStruct([prefill_length], jax.numpy.dtype("int32"))
-      prefill_executable[prefill_length] = (
-          jax.jit(
-              engine.prefill_aot,
-              in_shardings=(engine.param_layouts, None, None, None),
-          ).lower(params, key_shape, i32_scalar, rng_shape)
-      ).compile(compiler_options=None)
+      if config.attention == "paged":
+        page_state_shape = jax.eval_shape(engine.page_manager.get_initial_page_state)
+        prefill_executable[prefill_length] = (
+            jax.jit(
+                engine.prefill_aot,
+                in_shardings=(engine.param_layouts, None, None, None, None, None),
+                out_shardings=(None, None, None),
+            ).lower(params, key_shape, i32_scalar, rng_shape, page_state_shape, i32_scalar)
+        ).compile(compiler_options=None)
+      else:
+        prefill_executable[prefill_length] = (
+            jax.jit(
+                engine.prefill_aot,
+                in_shardings=(engine.param_layouts, None, None, None),
+            ).lower(params, key_shape, i32_scalar, rng_shape)
+        ).compile(compiler_options=None)
 
       prefill_insert_executable[prefill_length] = prefill_processor.aot_compile(params, prefill_length)
 
-      benchmark_results["prefill-result-sizes"][prefill_length] = summarize_prefill_result(
-          prefill_executable[prefill_length], params, prefill_tokens[prefill_length], prefill_true_lengths[prefill_length]
-      )
+      # summarize_prefill_result might need update if paged, but we can skip it or handle it.
+      # For now, only run if not paged to avoid complexity, or handle it.
+      if config.attention != "paged":
+        benchmark_results["prefill-result-sizes"][prefill_length] = summarize_prefill_result(
+            prefill_executable[prefill_length],
+            params,
+            prefill_tokens[prefill_length],
+            prefill_true_lengths[prefill_length],
+        )
 
     for prefill_length in prefill_lengths:
       benchmark_results["prefill"][prefill_length] = prefill_benchmark(
@@ -360,9 +427,11 @@ def run_benchmarks(config):
           prefill_true_lengths[prefill_length],
           num_model_params,
           benchmark_loop_iters,
+          page_state=page_state,
+          slot=0,
       )
 
-      prefill_insert_time, decode_state = prefill_insert_benchmark(
+      prefill_insert_time, decode_state, page_state = prefill_insert_benchmark(
           config,
           prefill_insert_executable[prefill_length],
           decode_state,
@@ -371,7 +440,10 @@ def run_benchmarks(config):
           prefill_tokens[prefill_length],
           prefill_true_lengths[prefill_length],
           benchmark_loop_iters,
+          page_state=page_state,
       )
+      if config.attention == "paged":
+        engine.page_state = page_state
       benchmark_results["insert"][prefill_length] = {}
       benchmark_results["insert"][prefill_length]["time_in_ms"] = (
           prefill_insert_time["time_in_ms"] - benchmark_results["prefill"][prefill_length]["time_in_ms"]
@@ -406,6 +478,14 @@ def run_benchmarks(config):
       )
 
   if "generate" in stages_to_benchmark:
+    page_state = None
+    if config.attention == "paged":
+      page_state = engine.page_state
+      # Relayout decode_state and page_state to match generate_executable's required AOT layouts
+      # pylint: disable=protected-access
+      decode_state = engine._iterated_layout(decode_state, engine.decode_state_input_layouts)
+      page_state = engine._iterated_layout(page_state, engine.page_state_input_layouts)
+      # pylint: enable=protected-access
     benchmark_results["autoregressive"], decode_state = ar_benchmark(
         config,
         generate_executable,
@@ -415,6 +495,7 @@ def run_benchmarks(config):
         cache_size,
         model_size,
         benchmark_loop_iters,
+        page_state=page_state,
     )
 
   results = collate_results(config, benchmark_results, model_size, cache_size, num_model_params)

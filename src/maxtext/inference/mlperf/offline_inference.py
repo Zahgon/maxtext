@@ -136,16 +136,22 @@ class PrefillHelper:
     """Prefill helper process runner"""
     padded_length = len(input_tokens_padded)
     if self._type == "default":
-      first_token, decode_state = self._processor.process(
-          model_params, decode_state, decode_slot, input_tokens_padded, input_true_length, rng
+      page_state = self.engine.page_state if self.engine.config.attention == "paged" else None
+      first_token, decode_state, new_page_state = self._processor.process(
+          model_params, decode_state, decode_slot, input_tokens_padded, input_true_length, rng, page_state=page_state
       )
+      if self.engine.config.attention == "paged":
+        self.engine.page_state = new_page_state
       prefill_done([(first_token, decode_slot)], [input_id], decode_state)
     elif self._type == "batch":
       if padded_length == max_length:
         # fallback to default mode
-        first_token, decode_state = self._processor.process(
-            model_params, decode_state, decode_slot, input_tokens_padded, input_true_length, rng
+        page_state = self.engine.page_state if self.engine.config.attention == "paged" else None
+        first_token, decode_state, new_page_state = self._processor.process(
+            model_params, decode_state, decode_slot, input_tokens_padded, input_true_length, rng, page_state=page_state
         )
+        if self.engine.config.attention == "paged":
+          self.engine.page_state = new_page_state
         prefill_done([(first_token, decode_slot)], [input_id], decode_state)
       else:
         self._batch_processor.process(
@@ -291,7 +297,12 @@ class OfflineInference:
           assert False, "no generate fn"
         result_tokens_l = []
         for i in range(10):
-          self.decode_state, result_tokens = gen_fn(self.params, self.decode_state, None)
+          if self.engine.config.attention == "paged":
+            self.decode_state, result_tokens, self.engine.page_state = gen_fn(
+                self.params, self.decode_state, None, self.engine.page_state
+            )
+          else:
+            self.decode_state, result_tokens = gen_fn(self.params, self.decode_state, None)
           result_tokens_l.append(result_tokens)
         for i in range(10):
           # result_tokens.copy_to_host_async()

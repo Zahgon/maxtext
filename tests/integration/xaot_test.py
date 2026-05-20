@@ -62,7 +62,7 @@ class CompileThenLoadTest(unittest.TestCase):
 
     prefix, topology_devices = next((v for k, v in device_info.items() if k in device_kind), (None, None))
     if prefix is None:
-      raise ValueError(f"Unsupported TPU device kind for AOT test: {device_kind}")
+      pytest.skip(f"Unsupported TPU device kind for AOT test: {device_kind}")
 
     return f"{prefix}-{topology_devices}"
 

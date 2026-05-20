@@ -43,7 +43,7 @@ import traceback
 import functools
 import dataclasses
 from enum import Enum
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 from collections.abc import Hashable
 from collections import defaultdict
 import time
@@ -53,7 +53,8 @@ import numpy as np
 from jax.sharding import Mesh
 from jax.experimental import mesh_utils
 
-from maxtext.inference.maxengine.maxengine import MaxEngine
+if TYPE_CHECKING:
+  from maxtext.inference.maxengine.maxengine import MaxEngine
 from maxtext.input_pipeline.packing.prefill_packing import PrefillProcessor
 from maxtext.input_pipeline.packing.prefill_packing import BatchedPrefillProcessor
 from maxtext.utils import max_logging
@@ -145,7 +146,7 @@ class PrefillHelper:
   def __init__(
       self,
       prefill_type: PrefillType,
-      engine: MaxEngine,
+      engine: "MaxEngine",
       prefill_lengths: list[int],
       batch_prefill_max_batch_size: int = 16,
       rng=None,
@@ -184,7 +185,7 @@ class PrefillHelper:
   ) -> tuple[jax.Array, jax.Array, DecodeState, jax.Array] | tuple[jax.Array, jax.Array, DecodeState]:
     """Prefill a single input."""
     # pylint: disable=protected-access
-    first_token, decode_state = self._processor._process(
+    first_token, decode_state, _ = self._processor._process(
         params,
         tokens,
         slot,
@@ -409,6 +410,9 @@ class InferenceWorker:
     Returns:
         tuple of (params, engine)
     """
+    # pylint: disable=import-outside-toplevel
+    from maxtext.inference.maxengine.maxengine import MaxEngine
+    # pylint: enable=import-outside-toplevel
     start_time = time.time()
     engine = MaxEngine(self.config, self.devices)
     params = engine.load_params(params=params, rng=self.rng)

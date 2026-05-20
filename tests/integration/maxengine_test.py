@@ -19,6 +19,8 @@ import sys
 import unittest
 
 import jax
+
+jax.config.update("jax_default_prng_impl", "unsafe_rbg")
 import jax.numpy as jnp
 from jax.sharding import Mesh
 import numpy as np
@@ -29,6 +31,7 @@ from maxtext.layers import quantizations
 
 pytest.importorskip("jetstream", reason="jetstream not installed")
 from maxtext.inference.maxengine import maxengine
+from maxtext.input_pipeline.packing.prefill_packing import PrefillProcessor
 from maxtext.models import models
 from maxtext.utils import maxtext_utils
 from tests.utils.test_helpers import get_test_config_path
@@ -156,6 +159,56 @@ class MaxEngineTest(unittest.TestCase):
     decode_state = engine.init_decode_state()
     prefill_result, _ = engine.prefill(params=params, padded_tokens=input_tokens, true_length=4)
     decode_state = engine.insert(prefill_result, decode_state, slot=0)
+    decode_state, result_token = engine.generate(params=params, decode_state=decode_state)
+
+    self.assertEqual(result_token.log_prob.ndim, 2)
+    self.assertEqual(result_token.log_prob.shape[1], 1)
+    self.assertEqual(result_token.data.ndim, 2)
+    self.assertEqual(result_token.data.shape[1], 3)
+
+  def test_paged_attention_decode(self):
+    if jax.devices()[0].platform != "tpu":
+      pytest.skip("Paged attention custom Pallas kernel is only supported on TPU platform!")
+    config = self.init_pyconfig(
+        attention="paged",
+        pagedattn_num_pages=64,
+        pagedattn_tokens_per_page=8,
+        pagedattn_max_pages_per_group=8,
+        max_prefill_predict_length=8,
+        max_target_length=64,
+        scan_layers=False,
+    )
+    devices_array = maxtext_utils.create_device_mesh(config)
+    mesh = Mesh(devices_array, config.mesh_axes)
+    quant = quantizations.configure_quantization(config)
+    model = models.transformer_as_linen(config=config, mesh=mesh, quant=quant, model_mode=MODEL_MODE_PREFILL)
+    ids, decoder_segment_ids, decoder_positions = self.get_data()
+
+    transformer_vars = model.init(
+        {"params": self.rng, "aqt": self.rng, "dropout": self.rng},
+        ids,
+        decoder_positions,
+        decoder_segment_ids,
+        enable_dropout=False,
+    )
+    input_tokens = jnp.array([1, 306, 5360, 304, 0, 0, 0, 0])
+    engine = maxengine.MaxEngine(config, jax.devices())
+    params = engine.load_params(params=transformer_vars)
+    # Populate AOT shapes/layouts for prefill processor
+    _, params, decode_state_executable = engine.aot_compile(params, pass_rng_shape=True)
+    prefill_processor = PrefillProcessor(engine)
+    decode_state = decode_state_executable(self.rng)
+    page_state = engine.page_state
+    _, decode_state, page_state = prefill_processor.process(
+        model_params=params,
+        decode_state=decode_state,
+        decode_slot=0,
+        input_tokens_padded=input_tokens,
+        input_true_length=4,
+        rng=self.rng,
+        page_state=page_state,
+    )
+    engine.page_state = page_state
     decode_state, result_token = engine.generate(params=params, decode_state=decode_state)
 
     self.assertEqual(result_token.log_prob.ndim, 2)

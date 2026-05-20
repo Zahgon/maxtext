@@ -366,12 +366,32 @@ def _update_decode_pages_global(
         can_allocate, lambda a: a.at[group_idx].set(next_free_page_global), lambda a: a, current_active_page
     )
 
+    # Detect allocation failure
+    allocation_failed = jnp.logical_and(needs_alloc, next_free_page_global < 0)
+
+    # Revert sequence length and active page position if allocation failed
+    final_seq_len = jnp.where(
+        allocation_failed,
+        page_state.sequence_lengths[group_idx],
+        current_state.sequence_lengths[group_idx],
+    )
+    final_active_page_pos = jnp.where(
+        allocation_failed,
+        page_state.active_page_position[group_idx],
+        current_state.active_page_position[group_idx],
+    )
+
+    new_sequence_lengths = current_state.sequence_lengths.at[group_idx].set(final_seq_len)
+    new_active_page_positions = current_state.active_page_position.at[group_idx].set(final_active_page_pos)
+
     # Reconstruct state for loop carry/return
     return current_state.replace(
         page_status=new_status,
         page_map=new_map,
         num_pages_used=new_num_used,
         active_page=new_active_page,
+        sequence_lengths=new_sequence_lengths,
+        active_page_position=new_active_page_positions,
     )
 
     # Initialize loop state with pre-calculated lengths and positions
@@ -500,10 +520,14 @@ class PageManager:
       )
       ```
     """
-    if page_group_id < 0 or page_group_id >= self.max_page_groups:
-      raise ValueError(f"PageManager: page_group_id ({page_group_id}) out of range [0, {self.max_page_groups})")
-    if true_length <= 0 or true_length > self.max_target_length:
-      raise ValueError(f"PageManager: true_length ({true_length}) out of range (0, {self.max_target_length}]")
+    # JAX JIT compatibility: validation checks are only run when not tracing in eager mode (tests)
+
+    if not isinstance(page_group_id, jax.core.Tracer):
+      if page_group_id < 0 or page_group_id >= self.max_page_groups:
+        raise ValueError(f"PageManager: page_group_id ({page_group_id}) out of range [0, {self.max_page_groups})")
+    if not isinstance(true_length, jax.core.Tracer):
+      if true_length <= 0 or true_length > self.max_target_length:
+        raise ValueError(f"PageManager: true_length ({true_length}) out of range (0, {self.max_target_length}]")
 
     return _release_and_reserve_for_group(
         page_state, page_group_id, true_length, self.tokens_per_page, self.max_pages_per_group
@@ -567,8 +591,11 @@ class PageManager:
       )
       ```
     """
-    if page_group_id < 0 or page_group_id >= self.max_page_groups:
-      raise ValueError(f"PageManager: page_group_id ({page_group_id}) out of range [0, {self.max_page_groups})")
+    # JAX JIT compatibility: validation checks are only run when not tracing in eager mode (tests)
+
+    if not isinstance(page_group_id, jax.core.Tracer):
+      if page_group_id < 0 or page_group_id >= self.max_page_groups:
+        raise ValueError(f"PageManager: page_group_id ({page_group_id}) out of range [0, {self.max_page_groups})")
     return _release_pages_for_group(page_state, page_group_id, self.max_pages_per_group)
 
   def get_initial_page_state(self) -> PageState:

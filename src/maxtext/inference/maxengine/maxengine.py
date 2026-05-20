@@ -120,6 +120,9 @@ class MaxEngine(_BaseEngine):
     self.replicated_sharding = jax.sharding.NamedSharding(self._mesh, P(None))
 
     self.abstract_params = None
+    self.decode_state_input_layouts = None
+    self.page_state_input_layouts = None
+    self.page_state_layouts = None
     self.prefill_kv_cache_annotations = None
     self.kv_cache_annotations = None
     self.kv_cache_annotations_named = None
@@ -143,34 +146,76 @@ class MaxEngine(_BaseEngine):
     max_utils.print_cpu_ram_stats(label)
 
   def generate_aot(
-      self, params: Params, decode_state: DecodeState, rng: PRNGKeyType | None = None
-  ):  # returns (new_decode_state, result_tokens)
+      self,
+      params: Params,
+      decode_state: DecodeState,
+      rng: PRNGKeyType | None = None,
+      page_state: PageState | None = None,
+  ):  # returns (new_decode_state, result_tokens) or (new_decode_state, result_tokens, page_state)
     """Wrapper to generate for ahead of time compilation."""
-
-    return self.generate(params=params, decode_state=decode_state, rng=rng)
+    if self.config.attention == "paged":
+      assert page_state is not None
+      page_state = self.page_manager.update_decode_pages(page_state)
+      new_state, result = self._generate_jit(
+          params=params,
+          decode_state=decode_state,
+          page_state=page_state,
+          rng=rng,
+      )
+      return max_utils.unbox_logicallypartioned(new_state), result, page_state
+    else:
+      return self.generate(params=params, decode_state=decode_state, rng=rng)
 
   def _compile_generate_and_get_layouts(
-      self, params: Any, decode_state: Any, rng_shape: Any, xla_flags: dict[str, Any] | None = None
-  ) -> tuple[Any, Any, Any, Any]:
+      self,
+      params: Any,
+      decode_state: Any,
+      page_state: Any,
+      rng_shape: Any,
+      xla_flags: dict[str, Any] | None = None,
+  ) -> tuple[Any, Any, Any, Any, Any | None, Any | None]:
     """Optimal memory layout for params and decode_state."""
 
     param_layout = Format(DLL.AUTO)
     decode_state_layout = Format(DLL.AUTO)
     # Keyword arguments are not yet supported in JAX for specifying shardings. Therefore, all AOT
     # compiled functions use arguments instead.
-    compiled_generate = (
-        jax.jit(
-            self.generate_aot,
-            in_shardings=(param_layout, decode_state_layout, None),
-            out_shardings=(Format(DLL.AUTO), Format(DLL.AUTO)),
-            donate_argnames=("decode_state",),
-        ).lower(params, decode_state, rng_shape)
-    ).compile(compiler_options=xla_flags)
+    if self.config.attention == "paged":
+      page_state_layout = Format(DLL.AUTO)
+      compiled_generate = (
+          jax.jit(
+              self.generate_aot,
+              in_shardings=(param_layout, decode_state_layout, None, page_state_layout),
+              out_shardings=(Format(DLL.AUTO), Format(DLL.AUTO), Format(DLL.AUTO)),
+              donate_argnames=("decode_state", "page_state"),
+          ).lower(params, decode_state, rng_shape, page_state)
+      ).compile(compiler_options=xla_flags)
 
-    arg_layouts, _ = compiled_generate.input_formats
-    generate_out_layouts, _ = compiled_generate.output_formats
+      arg_layouts, _ = compiled_generate.input_formats
+      decode_state_out_layout, _, page_state_out_layout = compiled_generate.output_formats
 
-    return compiled_generate, arg_layouts[0], arg_layouts[1], generate_out_layouts
+      return (
+          compiled_generate,
+          arg_layouts[0],
+          arg_layouts[1],
+          decode_state_out_layout,
+          arg_layouts[3],
+          page_state_out_layout,
+      )
+    else:
+      compiled_generate = (
+          jax.jit(
+              self.generate_aot,
+              in_shardings=(param_layout, decode_state_layout, None),
+              out_shardings=(Format(DLL.AUTO), Format(DLL.AUTO)),
+              donate_argnames=("decode_state",),
+          ).lower(params, decode_state, rng_shape)
+      ).compile(compiler_options=xla_flags)
+
+      arg_layouts, _ = compiled_generate.input_formats
+      decode_state_out_layout, _ = compiled_generate.output_formats
+
+      return compiled_generate, arg_layouts[0], arg_layouts[1], decode_state_out_layout, None, None
 
   def _identity(self, x: Any) -> Any:
     """Avoids lambda that breaks JAX caching."""
@@ -185,7 +230,8 @@ class MaxEngine(_BaseEngine):
         return x
       # Somehow this can be None sometimes.
       dll = (l.layout if jax.__version_info__ >= (0, 6, 3) else l.device_local_layout) if isinstance(l, Format) else l
-      f = jax.jit(self._identity, out_shardings=Format(dll, s)).lower(x).compile(compiler_options=xla_flags)
+      target_sharding = l.sharding if hasattr(l, "sharding") else s
+      f = jax.jit(self._identity, out_shardings=Format(dll, target_sharding)).lower(x).compile(compiler_options=xla_flags)
       y = f(x)
       # Achieves donation of the input argument, but allows for different memory
       # layouts and shapes.
@@ -207,8 +253,23 @@ class MaxEngine(_BaseEngine):
       rng_shape = None
     self.decode_state_shapes = jax.eval_shape(self.init_decode_state, rng_shape)
 
-    generate_executable, self.param_layouts, _, self.decode_state_layouts = self._compile_generate_and_get_layouts(
-        self.abstract_params, self.decode_state_shapes, rng_shape, xla_flags
+    page_state_shape = None
+    if self.config.attention == "paged" and self.page_manager is not None:
+      page_state_shape = jax.eval_shape(self.page_manager.get_initial_page_state)
+
+    (
+        generate_executable,
+        self.param_layouts,
+        self.decode_state_input_layouts,
+        self.decode_state_layouts,
+        self.page_state_input_layouts,
+        self.page_state_layouts,
+    ) = self._compile_generate_and_get_layouts(
+        self.abstract_params,
+        self.decode_state_shapes,
+        page_state_shape,
+        rng_shape,
+        xla_flags,
     )
     return (
         generate_executable,
@@ -405,15 +466,34 @@ class MaxEngine(_BaseEngine):
       padded_tokens: jax.Array,
       true_length: int,
       rng: PRNGKeyType | None = None,
-  ):  # returns (new_prefix, result_tokens)
+      page_state: PageState | None = None,
+      slot: int | None = None,
+  ):  # returns (new_prefix, result_tokens) or (new_prefix, result_tokens, page_state)
     """Wrapper for prefill for ahead-of-time compilation."""
-
-    return self.prefill(
-        params=params,
-        padded_tokens=padded_tokens,
-        true_length=true_length,
-        rng=rng,
-    )
+    if self.config.attention == "paged":
+      assert page_state is not None
+      assert slot is not None
+      page_state = self.page_manager.update_prefill_pages(
+          page_state=page_state,
+          page_group_id=slot,
+          true_length=true_length,
+      )
+      new_prefix, result = self._prefill_jit(
+          params=params,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+          page_state=page_state,
+          slot=slot,
+          rng=rng,
+      )
+      return new_prefix, result, page_state
+    else:
+      return self.prefill(
+          params=params,
+          padded_tokens=padded_tokens,
+          true_length=true_length,
+          rng=rng,
+      )
 
   @functools.partial(
       jax.jit, static_argnums=(0,), static_argnames=("return_prompt_logp", "algorithm", "topk", "nucleus_topp")
@@ -1203,7 +1283,8 @@ class MaxEngine(_BaseEngine):
         decode_state["generated_tokens"], self.replicated_sharding
     )
     inserted_next_pos = jax.lax.with_sharding_constraint(decode_state["next_pos"], self.replicated_sharding)
-    inserted_tokens = jax.lax.with_sharding_constraint(decode_state["tokens"], self.replicated_sharding)
+    # JIT compatibility: preserve FSDP sharding
+    inserted_tokens = decode_state["tokens"]
     inserted_cache = jax.lax.with_sharding_constraint(inserted_cache, self.kv_cache_shardings)
     inserted_token_logp = jax.lax.with_sharding_constraint(decode_state["token_logp"], self.replicated_sharding)
 
@@ -1304,7 +1385,8 @@ class MaxEngine(_BaseEngine):
           )
           return decode_state_cache
         else:
-          raise ValueError(f"We don't have a strategy for inserting {path_key} for paged attention.")
+          # Ignore other cache variables for paged attention
+          return decode_state_cache
 
       inserted_cache = jax.tree_util.tree_map_with_path(
           _copy_paged,
@@ -1337,7 +1419,10 @@ class MaxEngine(_BaseEngine):
     inserted_logits = jax.lax.with_sharding_constraint(inserted_logits, self.replicated_sharding)
     inserted_generated_tokens = jax.lax.with_sharding_constraint(inserted_generated_tokens, self.replicated_sharding)
     inserted_next_pos = jax.lax.with_sharding_constraint(inserted_next_pos, self.replicated_sharding)
-    inserted_tokens = jax.lax.with_sharding_constraint(inserted_tokens, self.replicated_sharding)
+    # JIT compatibility: preserve FSDP sharding
+    # inserted_tokens = jax.lax.with_sharding_constraint(
+    #     inserted_tokens, self.replicated_sharding
+    # )
     inserted_cache = jax.lax.with_sharding_constraint(inserted_cache, self.kv_cache_shardings)
     inserted_token_logp = jax.lax.with_sharding_constraint(inserted_token_logp, self.replicated_sharding)
 
@@ -1510,7 +1595,10 @@ class MaxEngine(_BaseEngine):
     inserted_logits = jax.lax.with_sharding_constraint(inserted_logits, self.replicated_sharding)
     inserted_generated_tokens = jax.lax.with_sharding_constraint(inserted_generated_tokens, self.replicated_sharding)
     inserted_next_pos = jax.lax.with_sharding_constraint(inserted_next_pos, self.replicated_sharding)
-    inserted_tokens = jax.lax.with_sharding_constraint(inserted_tokens, self.replicated_sharding)
+    # JIT compatibility: preserve FSDP sharding
+    # inserted_tokens = jax.lax.with_sharding_constraint(
+    #     inserted_tokens, self.replicated_sharding
+    # )
     inserted_cache = jax.lax.with_sharding_constraint(inserted_cache, self.kv_cache_shardings)
     inserted_token_logp = jax.lax.with_sharding_constraint(inserted_token_logp, self.replicated_sharding)
 
@@ -1670,6 +1758,13 @@ class MaxEngine(_BaseEngine):
     with nn_partitioning.axis_rules(self.config.logical_axis_rules):
       abstract_outputs = jax.eval_shape(init, self.abstract_params, page_state)
     logical_annotations = nn.get_partition_spec(abstract_outputs)
+    if self.config.attention == "paged":
+      # Force replicated sharding for non-cache decode state fields to match insert output
+      logical_annotations["tokens"] = P()
+      logical_annotations["next_pos"] = P()
+      logical_annotations["generated_tokens"] = P()
+      logical_annotations["token_logp"] = P()
+      logical_annotations["logits"] = P()
 
     with self._mesh, nn_partitioning.axis_rules(self.config.logical_axis_rules):
       mesh_annotations = nn.logical_to_mesh(logical_annotations)

@@ -496,6 +496,24 @@ class PagedAttentionOp(nnx.Module):
     batch_size, _, kv_heads, head_dim = key.shape
     kv_heads, _, _, head_dim = key_pages.shape
 
+    # Zero out newly allocated pages to prevent reading stale data from previous tenants
+    def zero_allocated_pages(i, carry):
+      k_pages, v_pages = carry
+      pos = page_state.active_page_position[i]
+      page = page_state.active_page[i]
+      has_active = page_state.has_active_page[i]
+
+      def zero_out(pack):
+        kp, vp = pack
+        kp = kp.at[:, page, :, :].set(0.0)
+        vp = vp.at[:, page, :, :].set(0.0)
+        return kp, vp
+
+      is_new_page = jnp.logical_and(has_active, pos == 0)
+      return jax.lax.cond(is_new_page, zero_out, lambda x: x, (k_pages, v_pages))
+
+    key_pages, value_pages = jax.lax.fori_loop(0, batch_size, zero_allocated_pages, (key_pages, value_pages))
+
     new_key = key.reshape(batch_size, kv_heads, head_dim)[:, :, :]
     new_key = jnp.transpose(new_key, (1, 0, 2))  # [n_kv_heads, batch_size, head_dim]
     new_value = value.reshape(batch_size, kv_heads, head_dim)[:, :, :]

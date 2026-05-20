@@ -281,6 +281,51 @@ class TestPageManager(unittest.TestCase):
     # Position should advance
     self.assertEqual(int(decode_state_partial.active_page_position[1]), 5, "Position incorrect (no boundary cross)")
 
+  def test_update_decode_pages_no_space(self):
+    """Tests update_decode_pages when a group needs a page but none are free globally."""
+    initial_state = self.pm.get_initial_page_state()
+    page_group_id = 0
+
+    # Prefill exactly one page full.
+    prefill_state_boundary = self.pm.update_prefill_pages(
+        page_state=initial_state, page_group_id=page_group_id, true_length=self.tokens_per_page
+    )
+    self.assertEqual(int(prefill_state_boundary.num_pages_used[page_group_id]), 1)
+    self.assertEqual(int(prefill_state_boundary.sequence_lengths[page_group_id]), self.tokens_per_page)
+    self.assertEqual(int(prefill_state_boundary.active_page_position[page_group_id]), 0)
+    initial_active_page = prefill_state_boundary.active_page[page_group_id]
+
+    # Simulate OOM by marking all pages as used.
+    oom_state = prefill_state_boundary.replace(page_status=jnp.ones((self.num_pages,), dtype=jnp.int32))
+
+    # Perform decode step - should fail to allocate and thus NOT increment length/position.
+    decode_state_oom = self.pm.update_decode_pages(page_state=oom_state)
+
+    # Verify sequence length did NOT advance
+    self.assertEqual(
+        int(decode_state_oom.sequence_lengths[page_group_id]),
+        self.tokens_per_page,
+        "Seq length should NOT advance if allocation fails",
+    )
+    # Verify page count did NOT increase
+    self.assertEqual(
+        int(decode_state_oom.num_pages_used[page_group_id]),
+        1,
+        "Page count should NOT increase if allocation fails",
+    )
+    # Verify active page did NOT change
+    self.assertEqual(
+        int(decode_state_oom.active_page[page_group_id]),
+        initial_active_page,
+        "Active page should NOT change if allocation fails",
+    )
+    # Verify active page position did NOT advance (should stay at 0, which was the old position)
+    self.assertEqual(
+        int(decode_state_oom.active_page_position[page_group_id]),
+        0,
+        "Position should stay 0 if allocation fails",
+    )
+
   def test_state_consistency(self):
     """Checks internal consistency of PageState after operations (global state)."""
     initial_state = self.pm.get_initial_page_state()
