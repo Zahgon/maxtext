@@ -236,7 +236,7 @@ def create_orbax_checkpoint_manager(
     enable_checkpointing: bool,
     use_async: bool,
     save_interval_steps: int,
-    dataset_type: None | str = "tfds",
+    dataset_type: None | str = None,
     orbax_logger: Any = None,  # pytype: disable=attribute-error
     use_ocdbt: bool = True,
     use_zarr3: bool = True,
@@ -269,7 +269,7 @@ def create_orbax_checkpoint_manager(
       )
   }
 
-  if dataset_type == "grain":
+  if dataset_type is not None and dataset_type == "grain":
     item_names += ("iter",)
     item_handlers["iter"] = GrainCheckpointHandler()
 
