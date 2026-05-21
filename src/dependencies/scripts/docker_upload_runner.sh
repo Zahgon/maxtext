@@ -57,6 +57,10 @@ if [ -f .dockerignore ]; then
   while IFS= read -r pattern; do
     # Ignore empty lines and comments
     if [[ -n "$pattern" && ! "$pattern" =~ ^# ]]; then
+      # Strip leading ./ if present
+      pattern="${pattern#./}"
+      # Strip trailing / if present
+      pattern="${pattern%/}"
       EXCLUDE_PATHS+=(-o -path "./$pattern")
     fi
   done < .dockerignore
@@ -103,7 +107,50 @@ docker build --no-cache --build-arg BASEIMAGE=${LOCAL_IMAGE_NAME} \
              -f "$PACKAGE_DIR"'/dependencies/dockerfiles/maxtext_runner.Dockerfile' \
              -t ${LOCAL_IMAGE_NAME_RUNNER} .
 
-docker tag ${LOCAL_IMAGE_NAME_RUNNER} gcr.io/$PROJECT/${CLOUD_IMAGE_NAME}:latest
-docker push gcr.io/$PROJECT/${CLOUD_IMAGE_NAME}:latest
+# Determine the full target image path
+export FULL_IMAGE_PATH=""
+if [[ "${CLOUD_IMAGE_NAME}" == *"/"* ]]; then
+  # If it contains '/', assume it's a full path (e.g., us-docker.pkg.dev/project/repo/image)
+  export FULL_IMAGE_PATH="${CLOUD_IMAGE_NAME}"
+else
+  # Otherwise, default to GCR
+  export FULL_IMAGE_PATH="gcr.io/${PROJECT}/${CLOUD_IMAGE_NAME}"
+fi
 
-echo "All done, check out your artifacts at: gcr.io/$PROJECT/${CLOUD_IMAGE_NAME}"
+# Append :latest if no tag is specified
+if [[ "${FULL_IMAGE_PATH}" != *":"* ]]; then
+  export FULL_IMAGE_PATH="${FULL_IMAGE_PATH}:latest"
+fi
+
+echo "Tagging local image ${LOCAL_IMAGE_NAME_RUNNER} as ${FULL_IMAGE_PATH}..."
+docker tag ${LOCAL_IMAGE_NAME_RUNNER} ${FULL_IMAGE_PATH}
+
+echo "Pushing image to registry..."
+docker push ${FULL_IMAGE_PATH}
+
+echo ""
+echo "========================================= SYSTEM VERIFICATION ========================================="
+echo "Verifying upload..."
+if [[ "${FULL_IMAGE_PATH}" == *"pkg.dev"* ]]; then
+  # Artifact Registry
+  if gcloud artifacts docker images describe "${FULL_IMAGE_PATH}" &> /dev/null; then
+    echo "✅ Success! Image verified in Artifact Registry."
+    # Try to print basic details if available
+    gcloud artifacts docker images describe "${FULL_IMAGE_PATH}" --format="yaml(image_summary.fully_qualified_digest)" 2>/dev/null || true
+  else
+    echo "⚠️ Warning: Could not verify image in Artifact Registry via gcloud."
+    echo "Please check your permissions or verify manually in the Cloud Console."
+  fi
+else
+  # Assume GCR
+  if gcloud container images describe "${FULL_IMAGE_PATH}" &> /dev/null; then
+    echo "✅ Success! Image verified in Container Registry."
+    gcloud container images describe "${FULL_IMAGE_PATH}" --format="yaml(image_summary.fully_qualified_digest)" 2>/dev/null || true
+  else
+    echo "⚠️ Warning: Could not verify image in Container Registry via gcloud."
+  fi
+fi
+echo "========================================================================================================="
+echo "All done! Use the following image path in your workload configuration:"
+echo "👉 ${FULL_IMAGE_PATH}"
+echo "========================================================================================================="
