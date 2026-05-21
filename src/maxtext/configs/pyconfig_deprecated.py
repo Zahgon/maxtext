@@ -18,6 +18,7 @@ from collections import OrderedDict
 from typing import Any
 from math import prod
 import math
+import warnings
 import os
 import sys
 import datetime
@@ -99,6 +100,13 @@ def validate_kv_quant_axis(s: str, quantize_kvcache: bool) -> None:
 
 
 def validate_attention_kernel(s: str) -> None:
+  if s == "paged":
+    warnings.warn(
+        "attention='paged' is deprecated and will be removed in a future release. "
+        "Please use native Ragged Attention ('attention=dot_product' or ragged setups) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
   valid_attention_kernels = (
       "autoselected",
       "dot_product",
