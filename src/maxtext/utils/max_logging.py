@@ -49,12 +49,3 @@ class NoisyLogFilter(std_logging.Filter):
   Class for defining log patterns to filter out
   """
 
-  def filter(self, record):
-    # Get the message; check both the raw msg and formatted message
-    msg = record.getMessage()
-    # Suppress "Type mismatch" warnings from tunix/generate/utils.py
-    if "Type mismatch on" in msg:
-      return False
-    if "No mapping for flat state" in msg:
-      return False
-    return True

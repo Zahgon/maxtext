@@ -169,32 +169,6 @@ class Qwen3CustomMoeDecoderLayer(AttentionWithNorm):
 
     self.out_sharding = create_sharding(self.mesh, self.activation_axis_names)
 
-  def apply_attention_with_norm(
-      self,
-      inputs: jnp.ndarray,
-      decoder_segment_ids: None | jnp.ndarray,
-      decoder_positions: None | jnp.ndarray,
-      deterministic: bool,
-      model_mode: str,
-      kv_cache: None | jnp.ndarray = None,
-      attention_metadata: None | dict[str, Any] = None,
-  ):
-    inputs = nn.with_logical_constraint(inputs, self.activation_axis_names)
-    inputs = checkpoint_name(inputs, "decoder_layer_input")
-    lnx = self.pre_self_attention_layer_norm(inputs)
-    lnx = nn.with_logical_constraint(lnx, self.activation_axis_names)
-    attention_lnx, kv_cache = self.self_attention(
-        lnx,
-        lnx,
-        decoder_positions,
-        decoder_segment_ids=decoder_segment_ids,
-        deterministic=deterministic,
-        model_mode=model_mode,
-        kv_cache=kv_cache,
-        attention_metadata=attention_metadata,
-    )
-    attention_lnx = nn.with_logical_constraint(attention_lnx, self.activation_axis_names)
-    return inputs, attention_lnx, kv_cache
 
   def __call__(
       self,

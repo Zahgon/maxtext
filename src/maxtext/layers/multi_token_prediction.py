@@ -116,37 +116,13 @@ class MultiTokenPredictionLayer(nnx.Module):
         rngs=rngs,
     )
 
-  @property
-  def embedding_norm(self):
-    return getattr(self, f"mtp_{self.layer_number}_embedding_norm")
 
-  @embedding_norm.setter
-  def embedding_norm(self, module):
-    setattr(self, f"mtp_{self.layer_number}_embedding_norm", module)
 
-  @property
-  def hidden_state_norm(self):
-    return getattr(self, f"mtp_{self.layer_number}_hidden_state_norm")
 
-  @hidden_state_norm.setter
-  def hidden_state_norm(self, module):
-    setattr(self, f"mtp_{self.layer_number}_hidden_state_norm", module)
 
-  @property
-  def projection_layer(self):
-    return getattr(self, f"mtp_{self.layer_number}_projection")
 
-  @projection_layer.setter
-  def projection_layer(self, module):
-    setattr(self, f"mtp_{self.layer_number}_projection", module)
 
-  @property
-  def transformer_layer(self):
-    return getattr(self, f"mtp_{self.layer_number}_transformer_layer")
 
-  @transformer_layer.setter
-  def transformer_layer(self, module):
-    setattr(self, f"mtp_{self.layer_number}_transformer_layer", module)
 
   def __call__(
       self,
@@ -193,16 +169,6 @@ class MultiTokenPredictionLayer(nnx.Module):
 
     if self.config.decoder_block == DecoderBlockType.DEEPSEEK and self.config.use_batch_split_schedule:
 
-      def extract_fn(x):
-        if isinstance(x, nnx.variablelib.Variable):
-          return sharding.maybe_shard_with_logical(
-              x.value,
-              x.sharding_names,
-              self.mesh,
-              shard_mode=self.config.shard_mode,
-              rules=self.config.logical_axis_rules,
-          )
-        return x
 
       output = deepseek_batchsplit.batch_split_layer(
           inputs=projected_features,

@@ -163,10 +163,7 @@ def _classify_query(dataset_rows, index, query_batches, args):
 
 def _pick_batch_size(num_samples, max_batch, dataset_size, sample_size):
   """max_batch to not run OOM."""
-  if num_samples <= max_batch:
-    return num_samples
-  mult = math.ceil(num_samples / max_batch)
-  return math.ceil(num_samples / mult * (sample_size / dataset_size))
+  pass
 
 
 def get_warmup_samples(dataset, args):
@@ -244,96 +241,19 @@ class SUT:
 
   def issue_queries(self, queries):
     """issue queries"""
-    log.info("Issue queries start")
-    assert self._sample_id_to_input is not None
-    self._processed_data = []
-    self._queries = queries
-
-    num_queries = len(self._queries)
-    num_skipped_queries = 0
-    num_grouped_queries = list(map(len, self._query_batches.values()))
-    log.info("Before Issue %d queries - classified queries %s", num_queries, str(num_grouped_queries))
-    self._query_batches = _init_query_batches(self.args)
-    for q in queries:
-      group_idx = _classify_query(self.pandas_rows, q.index, self._query_batches, self.args)
-      if group_idx == -1:
-        num_skipped_queries += 1
-        log.debug("Filtering out query of input len larger than acceptable configuration")
-      else:
-        input_data = copy.copy(self._sample_id_to_input[q.index])
-        input_data.id = q.id
-        self._query_batches[group_idx].append(input_data)
-    num_grouped_queries = list(map(len, self._query_batches.values()))
-    log.info(
-        "Issue %d queries - classified queries %s num_skipped %d",
-        num_queries,
-        str(num_grouped_queries),
-        num_skipped_queries,
-    )
-
-    assert len(self._queries) - num_skipped_queries == sum(
-        num_grouped_queries
-    ), f"num_queries {num_queries} does not match num_grouped_queries {num_grouped_queries}"
-    # At this point _processed_data is ready
-    log.info("Issue queries end")
+    pass
 
   @timed("flush_queries")
   def flush_queries(self):
     """flush queries"""
-    log.info("Flush queries start")
-    start = time.perf_counter()
-    for group_idx, group in self._query_batches.items():
-      log.info("Flush queries processing %s with %d samples", str(group_idx), len(group))
-      self.offline_inf_instances[group_idx].init_decode_state()
-      result = self.offline_inf_instances[group_idx].batch_inference(group, desc=f"batch-{group_idx}")
-      self.offline_inf_instances[group_idx].decode_state = None
-      for key, val in result.items():
-        if not val:
-          log.info("Value empty for key %s", key)
-          continue
-        key = int(key)
-        lg.FirstTokenComplete([make_response(key, [val[0]])])
-        resp = make_response(key, val)
-        lg.QuerySamplesComplete([resp])
-
-    end = time.perf_counter()
-    log.info("Flush queries end-start: %d", end - start)
-    gc.collect()
+    pass
 
   def LoadSamplesToRam(self, sample_list):
     """Pads the data, move them to jax array on device"""
-    log.info("LoadSamplesToRam start")
-    start = time.perf_counter()
-    input_data = {}
-    self.pandas_rows = list(self._dataset.iterrows())
-
-    for sample_id in sample_list:
-      p = self.pandas_rows[sample_id][1]
-      padded, length = pad_tokens(p.tok_input)
-      input_data[sample_id] = offline_inference.InputData("", jnp.array(padded), length)  # to be filled later
-
-    for data in input_data.values():
-      # make sure tokens are transferred to device
-      jax.block_until_ready(data.tokens)
-
-    self._sample_id_to_input = input_data
-
-    end = time.perf_counter()
-    log.info("LoadSamplesToRam finished: %ds", end - start)
-
-  def UnloadSamplesFromRam(self, sample_list):
-    log.info("UnloadSamplesFromRam called")
+    pass
 
 
-def make_response(id_, response_token_ids):
-  n_tokens = len(response_token_ids)
-  response_token_ids = np.array(response_token_ids, dtype=np.int64)
-  response_array = array.array("B", response_token_ids.tobytes())
-  response_info = response_array.buffer_info()
-  response_data = response_info[0]
-  response_size = response_info[1] * response_array.itemsize
-  query_sample_response = lg.QuerySampleResponse(id_, response_data, response_size, n_tokens)
-  return query_sample_response
+
 
 
 def _estimated_counts_by_bucket(dataset, args):

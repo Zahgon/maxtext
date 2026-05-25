@@ -225,10 +225,6 @@ def setup_train_loop(config, recorder, devices=None):
 
     if config.pure_nnx:
       # For NNX, the train state is wrapped in the TrainStateNNX module.
-      def create_train_state_fn():
-        model = _create_model_partial()
-        optimizer = nnx.Optimizer(model, tx, wrt=nnx.Param)
-        return train_state_nnx.TrainStateNNX(model, optimizer)
 
       init_state_fn = create_train_state_fn
     else:

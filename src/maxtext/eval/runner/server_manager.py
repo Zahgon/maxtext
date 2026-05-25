@@ -39,100 +39,7 @@ def _build_app(llm: Any) -> Any:
 
   app = fastapi.FastAPI()
 
-  @app.get("/health")
-  def health():
-    return {"status": "ok"}
 
-  @app.post("/v1/completions")
-  async def completions(request: fastapi.Request):
-    body = await request.json()
-
-    raw_prompt = body.get("prompt", "")
-    prompts = raw_prompt if isinstance(raw_prompt, list) else [raw_prompt]
-    model_name = body.get("model", "")
-    max_tokens = int(body.get("max_tokens") or 256)
-    temperature = float(body.get("temperature") or 0.0)
-    logprobs_n = body.get("logprobs")  # int | None
-    echo = bool(body.get("echo", False))
-    stop = body.get("stop")
-
-    sp_kwargs: dict = {"max_tokens": max_tokens, "temperature": temperature}
-    if logprobs_n is not None:
-      sp_kwargs["logprobs"] = int(logprobs_n)
-    if echo and logprobs_n is not None:
-      sp_kwargs["prompt_logprobs"] = int(logprobs_n)
-    if stop:
-      sp_kwargs["stop"] = [stop] if isinstance(stop, str) else list(stop)
-
-    outputs = llm.generate(prompts, SamplingParams(**sp_kwargs))
-    tokenizer = llm.get_tokenizer()
-
-    choices = []
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-
-    for idx, output in enumerate(outputs):
-      gen = output.outputs[0]
-      total_prompt_tokens += len(output.prompt_token_ids)
-      total_completion_tokens += len(gen.token_ids)
-
-      logprobs_payload = None
-      if logprobs_n is not None:
-        tok_strings: list[str] = []
-        tok_lps: list[float | None] = []
-        tok_offsets: list[int] = []
-        running_offset = 0
-
-        if echo:
-          prompt_lps = output.prompt_logprobs or []
-          for pos, tok_id in enumerate(output.prompt_token_ids):
-            tok_str = tokenizer.decode([tok_id])
-            tok_strings.append(tok_str)
-            tok_offsets.append(running_offset)
-            running_offset += len(tok_str)
-            lp_dict = prompt_lps[pos] if pos < len(prompt_lps) else None
-            lp_val = lp_dict[tok_id].logprob if (lp_dict and tok_id in lp_dict) else None
-            tok_lps.append(lp_val)
-
-        gen_lps = gen.logprobs or []
-        for pos, tok_id in enumerate(gen.token_ids):
-          tok_str = tokenizer.decode([tok_id])
-          tok_strings.append(tok_str)
-          tok_offsets.append(running_offset)
-          running_offset += len(tok_str)
-          lp_dict = gen_lps[pos] if pos < len(gen_lps) else None
-          lp_val = lp_dict[tok_id].logprob if (lp_dict and tok_id in lp_dict) else None
-          tok_lps.append(lp_val)
-
-        logprobs_payload = {
-            "tokens": tok_strings,
-            "token_logprobs": tok_lps,
-            "top_logprobs": None,
-            "text_offset": tok_offsets,
-        }
-
-      text_out = (prompts[idx] + gen.text) if echo else gen.text
-      choices.append(
-          {
-              "text": text_out,
-              "index": idx,
-              "logprobs": logprobs_payload,
-              "finish_reason": gen.finish_reason or "stop",
-          }
-      )
-
-    return {
-        "id": f"cmpl-{uuid.uuid4().hex}",
-        "object": "text_completion",
-        "created": int(time.time()),
-        "model": model_name,
-        "choices": choices,
-        "usage": {
-            "prompt_tokens": total_prompt_tokens,
-            "completion_tokens": total_completion_tokens,
-            "total_tokens": total_prompt_tokens + total_completion_tokens,
-        },
-    }
 
   @app.post("/v1/chat/completions")
   async def chat_completions(request: fastapi.Request):  # pylint: disable=unused-variable
@@ -140,48 +47,7 @@ def _build_app(llm: Any) -> Any:
 
     Used by evalchemy and lm-eval chat tasks.
     """
-    body = await request.json()
-    messages = body.get("messages", [])
-    model_name = body.get("model", "")
-    max_tokens = int(body.get("max_tokens") or 256)
-    temperature = float(body.get("temperature") or 0.0)
-    stop = body.get("stop")
-
-    tokenizer = llm.get_tokenizer()
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-
-    sp_kwargs: dict = {"max_tokens": max_tokens, "temperature": temperature}
-    if stop:
-      sp_kwargs["stop"] = [stop] if isinstance(stop, str) else list(stop)
-
-    outputs = llm.generate([prompt], SamplingParams(**sp_kwargs))
-    gen = outputs[0].outputs[0]
-    prompt_tokens = len(outputs[0].prompt_token_ids)
-    completion_tokens = len(gen.token_ids)
-
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model_name,
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": gen.text},
-                "finish_reason": gen.finish_reason or "stop",
-                "logprobs": None,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        },
-    }
+    pass
 
   return app
 
@@ -254,9 +120,6 @@ class VllmServerManager:
     self._uvicorn_server: Any | None = None
     self._server_thread: threading.Thread | None = None
 
-  @property
-  def base_url(self) -> str:
-    return f"http://{self.host}:{self.port}"
 
   def start(self) -> None:
     """Initialize the in-process vLLM LLM and start the HTTP server."""

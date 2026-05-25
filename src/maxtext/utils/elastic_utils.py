@@ -67,36 +67,7 @@ def elastic_enabled(config) -> bool:
 
 def clean_up_checkpoints(checkpoint_dir: str):
   """Cleans up incomplete checkpoints after an elastic event."""
-  max_logging.log("Elastic utils: Checking for incomplete checkpoint after an elastic event...")
-  checkpoint_dir = gcs_utils.add_trailing_slash(checkpoint_dir)
-
-  # 1. List the "directories" (steps)
-  checkpoints = gcs_utils.gcs_list_directories(checkpoint_dir)
-
-  # 2. Filter for directories that are numbers
-  checkpoints = [cp for cp in checkpoints if cp.isdigit()]
-
-  if not checkpoints:
-    max_logging.log("Found no existing checkpoints. Continuing")
-    return
-
-  # Sort naturally (numerical sort) and get the last one
-  checkpoints.sort(key=int)
-  latest_checkpoint_name = checkpoints[-1]
-  latest_checkpoint_path = f"{checkpoint_dir}{latest_checkpoint_name}/"
-
-  max_logging.log(f"Checking latest checkpoint: {latest_checkpoint_path}")
-
-  # 3. Check for commit_success file
-  success_markers = gcs_utils.gcs_glob_pattern(f"{latest_checkpoint_path}commit_success*")
-
-  if not success_markers:
-    max_logging.log(f"No commit_success file found. Deleting {latest_checkpoint_path}...")
-    # TODO: Use Orbax 'Cancel Ongoing Checkpointing' API when available to
-    # prevent deleting a checkpoint that is currently being written.
-    gcs_utils.gcs_delete_directory(latest_checkpoint_path)
-  else:
-    max_logging.log(f"Found commit_success file. Keeping {latest_checkpoint_path}.")
+  pass
 
 
 def ensure_elastic_manager_initialized(config):
@@ -148,9 +119,6 @@ def get_devices_per_host(config):
 def chain_callbacks(*funcs):
   """Helper function to chain callbacks."""
 
-  def wrapper():
-    for func in funcs:
-      func()
 
   return wrapper
 

@@ -128,20 +128,7 @@ def reformat_prompt(prompt, image_placeholder, model_name, num_images, video_pla
 
 def reformat_response(response, model_name):
   """Reformat response for different models."""
-  if model_name in ["llama4-17b-16e", "llama4-17b-128e"]:
-    formatted_response = f"{response}<|eot|>"
-    return formatted_response
-  elif model_name in ["gemma3-4b", "gemma3-12b", "gemma3-27b"]:
-    formatted_response = f"{response}<end_of_turn>"
-    return formatted_response
-  elif model_name in ["gemma4-26b", "gemma4-31b", "gemma4-e2b", "gemma4-e4b"]:
-    formatted_response = f"{response}<end_of_turn>"
-    return formatted_response
-  elif model_name in ["qwen3-omni-30b-a3b", "qwen3.5-397b-a17b"]:
-    formatted_response = f"{response}<|im_end|>"
-    return formatted_response
-  else:
-    return response
+  pass
 
 
 def prepare_text_for_image_fusion(tokens, config, processor_output=None):
@@ -209,36 +196,9 @@ def get_dummy_audio_shape_for_init(config):
 
 def get_bidirectional_mask_vision(config, decoder_input_tokens):
   """Get the bidirectional mask for specific models."""
-  bidirectional_mask_vision = None
-  if config.model_name in ["gemma3-4b", "gemma3-12b", "gemma3-27b"]:
-    from maxtext.multimodal.processor_gemma3 import GEMMA_TOKEN_PLACEHOLDER  # pylint: disable=import-outside-toplevel
-
-    bidirectional_mask_vision = decoder_input_tokens == GEMMA_TOKEN_PLACEHOLDER
-  elif config.model_name in ["gemma4-26b", "gemma4-31b", "gemma4-e2b", "gemma4-e4b"]:
-    from maxtext.multimodal.processor_gemma4 import GEMMA4_TOKEN_PLACEHOLDER  # pylint: disable=import-outside-toplevel
-
-    bidirectional_mask_vision = decoder_input_tokens == GEMMA4_TOKEN_PLACEHOLDER
-  elif config.model_name in ["llama4-17b-16e", "llama4-17b-128e"]:
-    from maxtext.multimodal.processor_llama4 import LLAMA4_PATCH_TOKEN  # pylint: disable=import-outside-toplevel
-
-    bidirectional_mask_vision = decoder_input_tokens == LLAMA4_PATCH_TOKEN
-  elif config.model_name in ["qwen3-omni-30b-a3b", "qwen3.5-397b-a17b"]:
-    from maxtext.multimodal.processor_qwen3_omni import QWEN3_OMNI_IMAGE_TOKEN, QWEN3_OMNI_VIDEO_TOKEN  # pylint: disable=import-outside-toplevel
-
-    # Create bidirectional_mask for vision/video token merging
-    bidirectional_mask_vision = (decoder_input_tokens == QWEN3_OMNI_IMAGE_TOKEN) | (
-        decoder_input_tokens == QWEN3_OMNI_VIDEO_TOKEN
-    )
-    # Create image/video mask for deepstack visual embedding injection
-  return bidirectional_mask_vision
+  pass
 
 
 def get_bidirectional_mask_audio(config, decoder_input_tokens):
   """Get the bidirectional mask for specific models."""
-  bidirectional_mask_audio = None
-  if config.model_name in ["qwen3-omni-30b-a3b"]:
-    from maxtext.multimodal.processor_qwen3_omni import QWEN3_OMNI_AUDIO_TOKEN  # pylint: disable=import-outside-toplevel
-
-    # Create bidirectional_mask for audio token merging
-    bidirectional_mask_audio = decoder_input_tokens == QWEN3_OMNI_AUDIO_TOKEN
-  return bidirectional_mask_audio
+  pass

@@ -637,70 +637,7 @@ class InferenceWorker:
     This thread processes DetokenizationTask objects from the queue,
     performs the numpy conversions, emits tokens, and manages decode slots.
     """
-    max_logging.log("Inference worker: starting detokenization thread")
-
-    while True:
-      try:
-        task = self.detokenization_queue.get(timeout=0.1)
-      except queue.Empty:
-        if not self.running and self.detokenization_queue.empty():
-          break
-        continue
-
-      start_time = time.time()
-      newly_empty = []
-
-      if task.task_type == "prefill":
-
-        # Process prefill results - convert to numpy and emit
-        with jax.profiler.TraceAnnotation("convert_to_numpy_and_emit_prefill"):
-          for i, result_tokens in enumerate(task.result_tokens):
-            prompt_id = task.prompt_ids[i]
-            slot = task.slots[i]
-
-            prompt_logp = task.prompt_logp[i]
-            true_length = self.true_lengths[prompt_id]
-
-            # Convert to numpy
-            first_token = np.array(result_tokens.data[:, 0])
-            log_prob = np.array(result_tokens.log_prob)
-            prompt_logp_np = np.array(prompt_logp)[:, :true_length]
-
-            # Emit token directly
-            should_terminate = self.emit_token(prompt_id, int(first_token), log_prob, prompt_logp=prompt_logp_np)
-            if should_terminate:
-              newly_empty.append(slot)
-
-      elif task.task_type == "decode":
-
-        # Check if there are any active sequences before expensive numpy conversion
-        active_slots = []
-        for slot, id_ in self.slot_to_id.items():
-          if id_ is not None and id_ not in self.completed_sequences:
-            active_slots.append((slot, id_))
-
-            # Skip processing entirely if no active sequences
-        if not active_slots:
-          continue
-
-          # Process single decode step - convert to numpy and emit
-        with jax.profiler.TraceAnnotation("convert_to_numpy_and_emit_decode_step"):
-          result_tokens_step = np.array(task.tokens_buffer)  # Single step tokens
-          log_prob_step = np.array(task.logprob_buffer)  # Single step logprobs
-
-          for slot, id_ in active_slots:
-            log_prob_at_slot = log_prob_step[slot]
-            result_tokens_at_slot = result_tokens_step[slot]
-            should_terminate = self.emit_token(id_, int(result_tokens_at_slot), log_prob_at_slot)
-            if should_terminate:
-              newly_empty.append(slot)
-              # Update decode slots
-      for slot in newly_empty:
-        self.slot_to_id[slot] = None
-        self.empty_decode_slots.add(slot)
-
-      if self.debug:
-        max_logging.log(f"Inference worker: detokenization in {time.time() - start_time} seconds")
+    pass
 
   def emit_token(
       self,

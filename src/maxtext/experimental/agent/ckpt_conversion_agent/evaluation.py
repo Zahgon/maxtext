@@ -34,31 +34,14 @@ def compressed_size(data: bytes, method: str = "gzip") -> int:
   Compress `data` using the specified method and return the length of the compressed bytes.
   method: 'gzip' | 'bz2' | 'lzma'
   """
-  if method == "gzip":
-    return len(zlib.compress(data))
-  elif method == "bz2":
-    return len(bz2.compress(data))
-  elif method == "lzma":
-    return len(lzma.compress(data))
-  else:
-    raise ValueError(f"Unknown compression method: {method}")
+  pass
 
 
 def estimate_kolmogorov(filepath: str) -> dict:
   """
   Read the file at `filepath` and return a dict of compression-based complexity estimates.
   """
-  with open(filepath, "rb") as f:
-    data = f.read()
-  results = {
-      "original_size": len(data),
-      "gzip_size": compressed_size(data, "gzip"),
-      "bz2_size": compressed_size(data, "bz2"),
-      "lzma_size": compressed_size(data, "lzma"),
-  }
-  # You could average or take the minimum as a final estimate:
-  results["approx_k_complexity"] = min(results["gzip_size"], results["bz2_size"], results["lzma_size"])
-  return results
+  pass
 
 
 def main():

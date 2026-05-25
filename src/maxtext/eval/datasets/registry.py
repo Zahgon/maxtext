@@ -57,4 +57,4 @@ def register_dataset(benchmark_name: str, dataset_cls: type[BenchmarkDataset]) -
     benchmark_name: Lowercase benchmark identifier.
     dataset_cls: A BenchmarkDataset subclass.
   """
-  DATASET_REGISTRY[benchmark_name.lower()] = dataset_cls
+  pass

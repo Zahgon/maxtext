@@ -230,29 +230,7 @@ def pretrain_preprocessing_pipeline(
   and multiprocessing (which `ElasticIterator` performs itself) and applies
   shift pre-batch on axis 0 rather than post-batch on axis 1.
   """
-  dataset = data_processing_utils.parse_and_keep_features(dataset, config, data_columns, tokenize)
-
-  assert len(data_columns) == 1
-  text_column = data_columns[0]
-
-  tokenizer_model, pad_id = data_processing_utils.get_tokenizer_and_pad_id(config)
-
-  if tokenize:
-    if config.use_truncation:
-      dataset = dataset.map(grain_tokenizer.TokenizeAndTrim(text_column, config.max_target_length, tokenizer_model))
-    else:
-      dataset = dataset.apply(grain_tokenizer.TokenizeAndChunk(text_column, config.max_target_length, tokenizer_model))
-
-  data_columns = ("inputs", "targets")
-  rekey_dict = {col: text_column for col in data_columns}
-  dataset = dataset.map(input_pipeline_utils.Rekey(rekey_dict))
-
-  batch_size = data_processing_utils.get_local_batch_size(config)
-  dataset = data_processing_utils.format_and_batch(dataset, config, batch_size, pad_id, data_columns, tokenizer_model)
-  dataset = data_processing_utils.apply_multiprocessing_and_prefetch(
-      dataset, config, grain_worker_count, grain_per_worker_buffer_size
-  )
-  return dataset
+  pass
 
 
 def dpo_preprocessing_pipeline(
@@ -264,53 +242,17 @@ def dpo_preprocessing_pipeline(
     grain_per_worker_buffer_size,
 ):
   """Use grain to pre-process the dataset and return iterators for dpo fine-tuning"""
-  dataset = data_processing_utils.parse_and_keep_features(dataset, config, data_columns, tokenize)
-  tokenizer_model, pad_id = data_processing_utils.get_tokenizer_and_pad_id(config)
-
-  if tokenize:
-    dataset = dataset.map(grain_tokenizer.TokenizeAndTrim(data_columns, config.max_target_length, tokenizer_model))
-
-  batch_size = config.global_batch_size_to_load // jax.process_count()
-  # DPO scores full sequences, so no shift.
-  dataset = data_processing_utils.format_and_batch(
-      dataset, config, batch_size, pad_id, data_columns, tokenizer_model, shift=False
-  )
-  dataset = data_processing_utils.apply_multiprocessing_and_prefetch(
-      dataset, config, grain_worker_count, grain_per_worker_buffer_size
-  )
-  return dataset
+  pass
 
 
 def _format_chat_template_grain(element, data_columns, tokenizer_model):
   """Grain-compatible mapping function to format raw columns into conversational messages."""
-  # Convert raw columns to conversational messages
-  if "messages" in data_columns:
-    messages = element["messages"]
-  elif set(data_columns) == {"prompt", "completion"}:
-    messages = [{"role": "user", "content": element["prompt"]}, {"role": "assistant", "content": element["completion"]}]
-  elif set(data_columns) == {"question", "answer"}:
-    messages = [{"role": "user", "content": element["question"]}, {"role": "assistant", "content": element["answer"]}]
-  else:
-    # Fallback if it's already a single string
-    messages = element[data_columns[0]]
-
-  assert all(
-      hasattr(m, "__contains__") and "role" in m and "content" in m for m in messages
-  ), f"SFT requires a conversational format. Expected dicts with 'role' and 'content', but got: {messages}"
-
-  # Assign the standardized messages back to the primary column
-  element[data_columns[0]] = messages
-
-  return input_pipeline_utils.apply_chat_template(
-      element, tokenizer_model=tokenizer_model, data_column_name=data_columns[0]
-  )
+  pass
 
 
 def _tokenize_sft_chunks(element, text_column_name, tokenizer_model):
   """Tokenize each chunk individually without truncating."""
-  text_chunks = element[text_column_name]
-  element[text_column_name] = [tokenizer_model.encode(chunk) for chunk in text_chunks]
-  return element
+  pass
 
 
 def sft_preprocessing_pipeline(
@@ -322,48 +264,7 @@ def sft_preprocessing_pipeline(
     grain_per_worker_buffer_size,
 ):
   """Use grain pipeline to pre-process the dataset and return iterators for sft fine-tuning"""
-  dataset = data_processing_utils.parse_and_keep_features(dataset, config, data_columns, tokenize)
-
-  tokenizer_model, pad_id = data_processing_utils.get_tokenizer_and_pad_id(config)
-  base_tokenizer_model = tokenizer_model
-
-  tokenizer_model = getattr(tokenizer_model, "tokenizer", tokenizer_model)
-
-  data_processing_utils.validate_and_configure_sft_columns(
-      data_columns, tokenizer_model, getattr(config, "chat_template", None)
-  )
-
-  dataset = dataset.map(
-      functools.partial(_format_chat_template_grain, data_columns=data_columns, tokenizer_model=tokenizer_model)
-  )
-
-  if tokenize:
-    dataset = dataset.map(
-        functools.partial(
-            _tokenize_sft_chunks,
-            text_column_name=data_columns[0],
-            tokenizer_model=tokenizer_model,
-        )
-    )
-
-  dataset = dataset.map(
-      input_pipeline_utils.SFTPromptMasking(
-          text_column_name=data_columns[0],
-          completion_only=config.sft_train_on_completion_only,
-          max_target_length=config.max_target_length,
-          unk_id=pad_id,
-      )
-  )
-  data_columns = ("inputs", "targets")
-
-  batch_size = data_processing_utils.get_local_batch_size(config)
-  dataset = data_processing_utils.format_and_batch(
-      dataset, config, batch_size, pad_id, data_columns, base_tokenizer_model
-  )
-  dataset = data_processing_utils.apply_multiprocessing_and_prefetch(
-      dataset, config, grain_worker_count, grain_per_worker_buffer_size
-  )
-  return dataset
+  pass
 
 
 def _get_pipeline_fn(config):

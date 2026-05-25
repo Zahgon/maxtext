@@ -62,34 +62,7 @@ def silent_worker_init() -> None:
   grading call doesn't pay multi-second cold-start latency inside the
   per-item timeout.
   """
-  os.environ["JAX_PLATFORMS"] = "cpu"
-  os.environ["TPU_VISIBLE_DEVICES"] = ""
-  os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-  os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-  # Quiet TF / TPU log noise in workers. Override unconditionally — the
-  # parent trainer process often sets these to 0 for its own debugging,
-  # and `setdefault` would inherit that loud value into every spawned
-  # grader worker. We want the workers silent regardless.
-  os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-  os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-  os.environ["TPU_MIN_LOG_LEVEL"] = "3"
-  os.environ["TPU_STDERR_LOG_LEVEL"] = "3"
-  os.environ["GRPC_VERBOSITY"] = "ERROR"
-  try:
-    # Eagerly import the heavy grader stack so all subsequent
-    # `verify_math_worker` calls in this worker are fast.
-    import math_verify  # pylint: disable=import-outside-toplevel,unused-import
-    from math_verify import parse, verify  # pylint: disable=import-outside-toplevel,unused-import
-    from math_verify.parser import (  # pylint: disable=import-outside-toplevel,unused-import
-        ExprExtractionConfig,
-        LatexExtractionConfig,
-    )
-    from sympy.parsing import sympy_parser  # pylint: disable=import-outside-toplevel,unused-import
-    from sympy import Basic, MatrixBase  # pylint: disable=import-outside-toplevel,unused-import
-  except Exception:  # pylint: disable=broad-exception-caught
-    # If the import fails, individual jobs will fail too and return 0.0;
-    # don't crash the worker at startup.
-    pass
+  pass
 
 
 def are_equal_under_sympy(gold: Any, prediction: Any) -> bool:

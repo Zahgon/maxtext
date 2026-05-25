@@ -57,16 +57,12 @@ def _possibly_unroll_params(config, training_state, training_state_annotations, 
     if layers is None or layers_annotations is None:
       raise ValueError(f"Missing {layer_name} in training_state or training_state_annotations.")
 
-    def new_pspec(x):
-      return jax.sharding.PartitionSpec(*(x[0 : config.param_scan_axis] + x[config.param_scan_axis + 1 :]))
 
     new_layer_annotation = jax.tree_util.tree_map(new_pspec, layers_annotations)
     new_layer_sharding = jax.tree_util.tree_map(lambda x: jax.sharding.NamedSharding(mesh, x), new_layer_annotation)
 
     for i in range(num_layers):
 
-      def slice_ith(input_layers):
-        return jax.tree_util.tree_map(lambda x: jax.numpy.take(x, i, axis=config.param_scan_axis), input_layers)
 
       # pylint: disable=not-callable
       new_layer = jax.jit(slice_ith, out_shardings=new_layer_sharding)(layers)

@@ -51,10 +51,7 @@ def map_to_prompt_completion(example):
       "completion": [{"role": "assistant", "content": "completion_1"}, {"role": "assistant", "content": "completion_2"}]
     }
   """
-  messages = example["messages"]
-  example["prompt"] = [message for message in messages if message["role"] == "user"]
-  example["completion"] = [message for message in messages if message["role"] == "assistant"]
-  return example
+  pass
 
 
 def extract_content(example, data_column_names):
@@ -69,9 +66,7 @@ def extract_content(example, data_column_names):
       "completion": ["completion_1", "completion_2"]
     }
   """
-  for column in data_column_names:
-    example[column] = [data["content"] for data in example[column]]
-  return example
+  pass
 
 
 def process_dataset(config, dataset):  # pylint: disable=redefined-outer-name

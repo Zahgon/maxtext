@@ -252,10 +252,6 @@ class Gemma3DecoderLayer(nnx.Module):
 
     if is_scan_carry:
 
-      def update_cache(cache, val):
-        if jnp.size(val) > 0:
-          return cache.at[layer_idx].set(val)
-        return cache
 
       stacked_kv_cache = jax.tree_util.tree_map(update_cache, stacked_kv_cache, kv_cache)
       return (layer_output, stacked_kv_cache, layer_idx + 1), None
@@ -573,14 +569,7 @@ def visionembedder_as_linen(
     mesh: Mesh,
 ):
   """Creates a VisionEmbedder module."""
-  return nnx_wrappers.to_linen(
-      VisionEmbedder,
-      config,
-      mesh=mesh,
-      name="VisionEmbedder_0",
-      abstract_init=False,
-      metadata_fn=variable_to_logically_partitioned,
-  )
+  pass
 
 
 class VisionExit(nnx.Module):
@@ -617,7 +606,7 @@ class VisionExit(nnx.Module):
 
 def vision_exit_as_linen(x: jax.Array, output_length: int) -> jax.Array:
   """A wrapper to use VisionExit as a function."""
-  return nnx.bridge.to_linen(VisionExit, output_length=output_length)(x)
+  pass
 
 
 class Gemma3VisionEncoderLayer(nnx.Module):
@@ -713,12 +702,4 @@ def gemma3visionencoder_as_linen(
     mesh: Mesh,
 ):
   """Creates a Gemma3VisionEncoder module."""
-  module = nnx_wrappers.to_linen(
-      Gemma3VisionEncoderLayer,
-      config=config,
-      mesh=mesh,
-      name="Gemma3VisionEncoderLayer_0",
-      abstract_init=False,
-      metadata_fn=variable_to_logically_partitioned,
-  )
-  return module
+  pass

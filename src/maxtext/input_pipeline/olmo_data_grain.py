@@ -93,11 +93,6 @@ class OlmoNpyDataSource(grain.sources.RandomAccessDataSource):
 
   # ---- Helpers ------------------------------------------------------------ #
 
-  def _resolve_path(self, path: str) -> str:
-    for prefix, replacement in self._path_remap.items():
-      if path.startswith(prefix):
-        return replacement + path[len(prefix) :]
-    return path
 
   def __getstate__(self):
     # Mmap caches don't survive pickling; rebuild after unpickle.
@@ -222,14 +217,11 @@ class OlmoIndexSampler:
 
   # ---- Public API --------------------------------------------------------- #
 
-  @property
-  def num_instances(self) -> int:
-    return self._total
 
   @property
   def num_local_instances_per_epoch(self) -> int:
     """Instances assigned to *this* host per epoch (drops trailing remainder)."""
-    return self._total // self._shard_count
+    pass
 
   def shuffled_global_indices(self, *, seed: int, epoch: int) -> np.ndarray:
     """Build the full shuffled list for ``(seed, epoch)``.
@@ -240,28 +232,12 @@ class OlmoIndexSampler:
     ``build_and_save_global_indices``. Sized for unit tests + the initial
     smoke training run for now.
     """
-    if not self._shuffle:
-      return np.arange(self._total, dtype=np.uint64)
-    rng = np.random.default_rng(_combine_seed_epoch(seed, epoch))
-    order = rng.permutation(self._total)
-    return order.astype(np.uint64, copy=False)
+    pass
 
   def shard_indices(self, *, seed: int, epoch: int) -> np.ndarray:
     """Slice the global shuffled order down to this host's share."""
-    full = self.shuffled_global_indices(seed=seed, epoch=epoch)
-    n_per = self.num_local_instances_per_epoch
-    start = self._shard_index * n_per
-    end = start + n_per
-    return full[start:end]
+    pass
 
-  def _shard_indices_for_epoch(self, epoch: int) -> np.ndarray:
-    with self._cache_lock:
-      if self._cached_epoch == epoch and self._cached_shard_indices is not None:
-        return self._cached_shard_indices
-      shard = self.shard_indices(seed=self._seed, epoch=epoch)
-      self._cached_epoch = epoch
-      self._cached_shard_indices = shard
-      return shard
 
   def __getstate__(self):
     # threading.Lock can't be pickled, and the per-epoch cache is a pure perf
@@ -358,17 +334,7 @@ class NgramFilterTransform(grain.transforms.Map):
 
   def map(self, element: Dict[str, Any]) -> Dict[str, Any]:
     """Add ``instance_mask`` to ``element`` based on the n-gram filter."""
-    tokens = element["tokens"]
-    clean = is_clean_instance(
-        tokens,
-        repetition_max_period=self._max_period,
-        repetition_min_period=self._min_period,
-        repetition_max_count=self._max_count,
-        mask_value=self._mask_value,
-    )
-    out = dict(element)
-    out["instance_mask"] = bool(clean)
-    return out
+    pass
 
 
 class ShiftToInputsTargets(grain.transforms.Map):
@@ -396,37 +362,7 @@ class ShiftToInputsTargets(grain.transforms.Map):
 
   def map(self, element: Dict[str, Any]) -> Dict[str, Any]:
     """Convert ``tokens`` into ``inputs`` / ``targets`` / segmentation tensors."""
-    tokens = element["tokens"].astype(np.int32, copy=False)
-    L = tokens.shape[0]  # == sequence_length from the index
-    instance_mask = bool(element.get("instance_mask", True))
-    seg_value = np.int32(1) if instance_mask else np.int32(0)
-
-    # Output rank-2 (batch, seq) tensors of length L (= max_target_length).
-    # The TPU splash-attention kernel requires q_seq_len to be divisible by
-    # 512, which means the trainer-side seq length must be the full L —
-    # using ``tokens[:-1]`` (length L-1) breaks that invariant.
-    #
-    # For next-token prediction we still want ``targets[i] = tokens[i+1]``,
-    # so we shift and pad the last position with 0 then *mask it out* via
-    # ``targets_segmentation[L-1] = 0``. The trainer's segmentation-aware
-    # loss skips positions where targets_segmentation == 0, so the padded
-    # last token contributes nothing to the loss. Information loss is
-    # 1 token per ``L``-token instance (~0.012% at L=8192).
-    inputs = tokens
-    targets = np.empty(L, dtype=np.int32)
-    targets[:-1] = tokens[1:]
-    targets[-1] = 0  # pad; loss masked below
-
-    targets_seg = np.full(L, seg_value, dtype=np.int32)
-    targets_seg[-1] = 0  # never compute loss on the boundary position
-
-    return {
-        "inputs": inputs,
-        "targets": targets,
-        "inputs_position": np.arange(L, dtype=np.int32),
-        "inputs_segmentation": np.ones(L, dtype=np.int32),
-        "targets_segmentation": targets_seg,
-    }
+    pass
 
 
 def make_olmo_grain_data_loader(

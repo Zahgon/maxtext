@@ -58,34 +58,12 @@ jax.config.update("jax_platform_name", "cpu")
 
 def _load_gcs_shard(gcs_path: str, fs: gcsfs.GCSFileSystem) -> Dict[str, np.ndarray]:
   """Worker function to read and process a single safetensors file from GCS."""
-  max_logging.log(f"Processing GCS shard: {gcs_path}")
-
-  # Read bytes
-  with fs.open(gcs_path, "rb") as f:
-    file_bytes = f.read()
-
-  # Parse Safetensors
-  loaded_tensors = load_safetensors(file_bytes)
-
-  # Convert to Numpy
-  shard_dict = {}
-  for key, tensor in loaded_tensors.items():
-    shard_dict[key] = tensor.numpy()
-
-  return shard_dict
+  pass
 
 
 def _load_local_shard(file_path: str) -> Dict[str, np.ndarray]:
   """Worker function to read and process a single safetensors file from local disk using safe_open."""
-  max_logging.log(f"Processing local shard: {file_path}")
-
-  shard_dict = {}
-  with safe_open(file_path, framework="pt", device="cpu") as f:
-    for key in f.keys():
-      loaded_tensors = f.get_tensor(key)
-      shard_dict[key] = loaded_tensors.numpy()
-
-  return shard_dict
+  pass
 
 
 def load_safetensors_generic(path: str, max_workers: int) -> Dict[str, np.ndarray]:

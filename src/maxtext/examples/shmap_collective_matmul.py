@@ -81,11 +81,6 @@ def simple_timeit(f, *args, tries=10, trace_base_dir=None, task=None):
 
 
 # gen data
-def gen_data_fn():
-  key = jax.random.PRNGKey(np.random.randint(0, 256))
-  activations = jax.random.normal(key, shape=(batch_size, seq_len, emb_dim), dtype=jnp.bfloat16)  # pylint: disable=redefined-outer-name
-  weights = jax.random.normal(key, shape=(emb_dim, n_heads, head_dim), dtype=jnp.bfloat16)  # pylint: disable=redefined-outer-name
-  return activations, weights
 
 
 data_fn = pjit(
@@ -113,68 +108,7 @@ jit_matmul = pjit(matmul, out_shardings=P(MESH_FSDP_AXIS, None, MESH_TENSOR_AXIS
 )
 def collective_matmul(activations, weights):  # pylint: disable=redefined-outer-name
   """Collective matrix multiply"""
-  print(f"sh_map {activations.shape=} {weights.shape=}")
-
-  axis_size = jax.lax.psum(1, axis_name=MESH_TENSOR_AXIS)
-  axis_index = jax.lax.axis_index(axis_name=MESH_TENSOR_AXIS)
-  # The current sequence chunk
-  chunk_size = activations.shape[1]
-  mid_chunk = chunk_size // 2
-  # create accum buffer
-  accum = jnp.zeros(
-      (
-          activations.shape[0],
-          activations.shape[1] * axis_size,
-          weights.shape[-2],
-          weights.shape[-1],
-      ),
-      dtype=activations.dtype,
-  )
-
-  # compute first chunk
-  update = jnp.einsum("bsE,Ehd->bshd", activations, weights)
-  update_index = (0, axis_index * chunk_size, 0, 0)
-  accum = jax.lax.dynamic_update_slice(accum, update, update_index)
-  activation_forward, activation_backward = jnp.split(activations, 2, axis=1)
-  activation_forward = jax.lax.ppermute(
-      activation_forward,
-      axis_name=MESH_TENSOR_AXIS,
-      perm=[(j, (j + 1) % axis_size) for j in range(axis_size)],
-  )
-  activation_backward = jax.lax.ppermute(
-      activation_backward,
-      axis_name=MESH_TENSOR_AXIS,
-      perm=[(j, (j - 1) % axis_size) for j in range(axis_size)],
-  )
-
-  # split activations into chunks and send
-  def scanned_call(i, carrys):
-    accum, activation_forward, activation_backward = carrys
-    update_forward = jnp.einsum("bsE,Ehd->bshd", activation_forward, weights)
-    update_backward = jnp.einsum("bsE,Ehd->bshd", activation_backward, weights)
-
-    activation_forward = jax.lax.ppermute(
-        activation_forward,
-        axis_name=MESH_TENSOR_AXIS,
-        perm=[(j, (j + 1) % axis_size) for j in range(axis_size)],
-    )
-    activation_backward = jax.lax.ppermute(
-        activation_backward,
-        axis_name=MESH_TENSOR_AXIS,
-        perm=[(j, (j - 1) % axis_size) for j in range(axis_size)],
-    )
-
-    forward_update_index = ((axis_index - i - 1) % axis_size) * chunk_size
-    backward_update_index = ((axis_index + i + 1) % axis_size) * chunk_size + mid_chunk
-
-    accum = jax.lax.dynamic_update_slice(accum, update_forward, (0, forward_update_index, 0, 0))
-    accum = jax.lax.dynamic_update_slice(accum, update_backward, (0, backward_update_index, 0, 0))
-    return (accum, activation_forward, activation_backward)
-
-  print(f"{accum.shape=}")
-
-  accum, _, _ = jax.lax.fori_loop(0, (axis_size - 1), scanned_call, (accum, activation_forward, activation_backward))
-  return accum
+  pass
 
 
 def main():

@@ -52,30 +52,7 @@ def apply_lora_on_base_params(base_params, lora_params, lora_scale_factor=1.0):
   on the base model. The leaf nodes of lora_params are only not-None if it is the target
   module for lora in its config.
   """
-
-  def lora_update_or_base(base_weight, lora_a, lora_b):
-    if lora_a is not None and lora_b is not None:
-      return base_weight + jnp.einsum("br,rnd->bnd", lora_b, lora_a) * lora_scale_factor
-    else:
-      return base_weight  # Keep the base weight if no Lora update
-
-  def apply_lora_recursively(base_params, lora_params, module_name):
-    for name, param in lora_params.items():
-      if isinstance(param, dict):
-        apply_lora_recursively(base_params[name], param, f"{module_name}.{name}")
-      elif param is not None:
-        if name not in ["lora_a.kernel", "lora_b.kernel"]:
-          raise ValueError(f"Unexpected non-lora specific weights ({module_name}.{name}) found in the lora_params")
-
-        lora_b = lora_params["lora_a.kernel"]
-        lora_a = lora_params["lora_b.kernel"]
-
-        base = base_params["kernel"]
-
-        base_params["kernel"] = lora_update_or_base(base, lora_a, lora_b)
-        break
-
-  apply_lora_recursively(base_params, lora_params, "")
+  pass
 
 
 def unapply_lora_from_base_params(base_params, lora_params, lora_scale_factor=1.0):
@@ -91,64 +68,14 @@ def unapply_lora_from_base_params(base_params, lora_params, lora_scale_factor=1.
   on the base model. The leaf nodes of lora_params are only not-None if it is the target
   module for lora in its config.
   """
-
-  def lora_update_or_base(base_weight, lora_a, lora_b):
-    if lora_a is not None and lora_b is not None:
-      return base_weight - jnp.einsum("br,rnd->bnd", lora_b, lora_a) * lora_scale_factor
-    else:
-      return base_weight  # Keep the base weight if no Lora update
-
-  def unapply_lora_recursively(base_params, lora_params, module_name):
-    for name, param in lora_params.items():
-      if isinstance(param, dict):
-        unapply_lora_recursively(base_params[name], param, f"{module_name}.{name}")
-      elif param is not None:
-        if name not in ["lora_a.kernel", "lora_b.kernel"]:
-          raise ValueError(f"Unexpected non-lora specific weights ({module_name}.{name}) found in the lora_params")
-
-        lora_b = lora_params["lora_a.kernel"]
-        lora_a = lora_params["lora_b.kernel"]
-
-        base_kernel = base_params["kernel"]
-
-        base_params["kernel"] = lora_update_or_base(base_kernel, lora_a, lora_b)
-        break
-
-  unapply_lora_recursively(base_params, lora_params, "")
+  pass
 
 
 def load_adapter(config, base_abstract_state_params, adapter_config_path, adapter_weights_path):
   """
   Load the LoRA weights into a PyTree and return it.
   """
-  # Load LoRA weights
-  lora_params = None
-  lora_config = None
-  if adapter_config_path:
-    if adapter_config_path.startswith("gs://"):
-      lora_config = gcs_utils.read_json_from_gcs(adapter_config_path)
-    else:
-      with open(adapter_config_path, "rt", encoding="utf8") as f:
-        lora_config = json.load(f)
-
-    if lora_config is None:
-      raise FileNotFoundError(f"Failed to read lora_config from {adapter_config_path}.")
-
-    if not gcs_utils.gcs_path_exists(f"{adapter_weights_path}/commit_success.txt"):
-      raise FileNotFoundError(f"Failed to read lora_weights from {adapter_weights_path}.")
-
-    lora_state, _ = get_lora_abstract_state(base_abstract_state_params, lora_config)
-
-    with nn_partitioning.axis_rules(config.logical_axis_rules):
-      lora_params = checkpointing.load_params_from_path(
-          adapter_weights_path,
-          lora_state.params,
-          config.checkpoint_storage_concurrent_gb,
-          config.checkpoint_storage_use_ocdbt,
-          config.checkpoint_storage_use_zarr3,
-      )
-
-  return lora_params, lora_config
+  pass
 
 
 def setup_initial_lora_state(model, data_iterator, tx, config, rng, mesh, checkpoint_manager, lora_adapter_path):
@@ -577,29 +504,6 @@ def restore_lora_from_path(trainer: Any, mt_config: pyconfig.HyperParameters) ->
     restored_lora_params = ocp.PyTreeCheckpointer().restore(lora_restore_path)
 
   # Post processing
-  def _map_to_state(path, variable):
-    if not isinstance(variable, nnx.Variable):
-      return
-
-    str_path = [str(k.key if hasattr(k, "key") else (k.name if hasattr(k, "name") else k)) for k in path]
-
-    curr = restored_lora_params
-    for p in str_path:
-      if isinstance(curr, dict) and p in curr:
-        curr = curr[p]
-      elif hasattr(curr, p):
-        curr = getattr(curr, p)
-      else:
-        return
-
-    if isinstance(curr, dict) and "value" in curr:
-      matched_val = curr["value"]
-    elif hasattr(curr, "value"):
-      matched_val = getattr(curr, "value")
-    else:
-      matched_val = curr
-
-    variable.value = matched_val
 
   jax.tree_util.tree_map_with_path(
       _map_to_state,

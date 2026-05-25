@@ -96,7 +96,7 @@ def l2_norm_as_linen(self, eps: float = 1e-6):
   Args:
     eps: float, epsilon used for numerical stability (default value should be ok for most cases).
   """
-  return nnx_wrappers.to_linen(L2Norm, eps=eps, metadata_fn=variable_to_logically_partitioned)
+  pass
 
 
 def attention_as_linen(
@@ -598,9 +598,6 @@ class Attention(nnx.Module):
     else:
       depth_scaling = jnp.sqrt(self.head_dim).astype(self.dtype)
 
-    def query_init(*args):
-      # pylint: disable=no-value-for-parameter
-      return self.kernel_init(*args) / depth_scaling
 
     kernel_axes = (
         (None, None, None) if self.config.ici_context_autoregressive_parallelism > 1 else ("embed", "q_heads", "kv")
@@ -707,15 +704,8 @@ class Attention(nnx.Module):
 
   def qkv_projection(self, inputs: Array, proj_name: str, out_sharding: NamedSharding | None = None):
     """Fused QKV projection"""
+    pass
 
-    qkv_proj = self.qkv_proj(inputs, out_sharding)
-    qkv_proj = checkpoint_name(qkv_proj, "qkv_proj")
-    query, key, value = qkv_proj[:, :, 0, ...], qkv_proj[:, :, 1, ...], qkv_proj[:, :, 2, ...]
-    return query, key, value
-
-  @property
-  def out_head_dim(self) -> int:
-    return self.head_dim
 
   def init_out_w(self, output_dim: int) -> nnx.Module:
     """out projection"""
@@ -748,7 +738,7 @@ class Attention(nnx.Module):
 
   def out_projection(self, out: Array, out_sharding: NamedSharding | None = None) -> Array:
     """out projection"""
-    return self.out(out, out_sharding=out_sharding)
+    pass
 
   def compute_shared_kv(
       self,
@@ -763,25 +753,7 @@ class Attention(nnx.Module):
     ``__call__`` as ``shared_key`` / ``shared_value`` to avoid double-computing,
     and forwards the same tensors to downstream shared layers.
     """
-    if self.share_kv_layer:
-      raise ValueError("compute_shared_kv cannot be called on a share_kv_layer=True layer.")
-    if self.config.fused_qkv:
-      raise ValueError("compute_shared_kv is incompatible with fused_qkv.")
-    qkv_sharding = create_sharding(self.mesh, self.input_axis_names)
-    key = self.kv_projection(inputs_kv, proj_name="key", out_sharding=qkv_sharding)
-    value = (
-        key if self.share_kv_projections else self.kv_projection(inputs_kv, proj_name="value", out_sharding=qkv_sharding)
-    )
-    is_llama4_decoder_block = self.config.decoder_block == DecoderBlockType.LLAMA4
-    if (self.use_qk_norm and not is_llama4_decoder_block) or self.is_qwen3_hybrid:
-      key = self.key_norm(key)
-    if self.use_v_norm:
-      value = self.value_norm(value)
-    if not self.is_nope_layer:
-      key = self.apply_rotary_embedding(key, inputs_positions=inputs_positions, rope_kwargs=rope_kwargs)
-    if self.use_qk_norm and is_llama4_decoder_block and not self.is_nope_layer:
-      key = L2Norm(eps=self.config.normalization_layer_epsilon)(key)
-    return key, value
+    pass
 
   def convert_dense_general_inputs_shape(
       self,
@@ -941,15 +913,7 @@ class Attention(nnx.Module):
     Returns:
       The input tensor with rotary embeddings applied.
     """
-    if isinstance(self.rotary_embedding, Qwen3OmniMoeVisionRotaryEmbedding):
-      # For Qwen3OmniMoe vision, pass static dimensions from kwargs.
-      num_frames = rope_kwargs.get("num_frames")
-      height = rope_kwargs.get("height")
-      width = rope_kwargs.get("width")
-      # Type cast required: Omni rotary embedding uses different __call__ parameters than other embeddings.
-      return cast(Qwen3OmniMoeVisionRotaryEmbedding, self.rotary_embedding)(inputs, num_frames, height, width)
-    else:
-      return self.rotary_embedding(inputs, inputs_positions)
+    pass
 
   def init_kv_caches(self, inputs_kv_shape: Tuple):
     """Initializes KVCache.
@@ -1008,15 +972,7 @@ class Attention(nnx.Module):
       - The prefill key-value cache, or None.
       - The autoregressive key-value cache, or None.
     """
-    prefill_kv_cache, ar_kv_cache = self.KVCache_0(
-        key=key,
-        value=value,
-        decoder_segment_ids=decoder_segment_ids,
-        model_mode=model_mode,
-        use_ragged_attention=self.use_ragged_attention,
-        previous_chunk=previous_chunk,
-    )
-    return [prefill_kv_cache, ar_kv_cache]
+    pass
 
   def forward_serve_vllm(
       self,
@@ -1027,51 +983,7 @@ class Attention(nnx.Module):
       rpa_metadata: dict[str, Any] | None = None,
   ) -> tuple[Array, list[Array]]:
     """Forward function for vLLM serving with RPA attention."""
-    try:
-      # pylint: disable=import-outside-toplevel
-      # pytype: disable=import-error
-      from tpu_inference.layers.common.attention_interface import sharded_ragged_paged_attention as rpa_ops
-    except ImportError as e:
-      raise ImportError(
-          "vLLM RPA attention ops require the vllm-tpu package. Please install it with `pip install vllm-tpu`."
-      ) from e
-
-    query = query.reshape(-1, query.shape[2], query.shape[3])
-    key = key.reshape(-1, key.shape[2], key.shape[3])
-    value = value.reshape(-1, value.shape[2], value.shape[3])
-
-    if rpa_kv_cache is None or rpa_metadata is None:
-      # Return dummy values for dry runs (e.g. during model initialization or JIT tracing)
-      return query, []
-
-    if self.config.sliding_window_size > 0:
-      attention_chunk_size = self.config.sliding_window_size
-    else:
-      # Chunked attention currently not used in vLLM RPA.
-      attention_chunk_size = None
-
-    q_scale, k_scale, v_scale = None, None, None
-
-    md = rpa_metadata
-
-    output, kv_cache = rpa_ops(
-        self.mesh,
-        query,
-        key,
-        value,
-        rpa_kv_cache,
-        md.seq_lens,
-        md.block_tables,
-        md.query_start_loc,
-        md.request_distribution,
-        self.sinks.astype(jnp.float32) if self.sinks is not None else None,
-        1.0,
-        attention_chunk_size,
-        q_scale,
-        k_scale,
-        v_scale,
-    )
-    return output, kv_cache
+    pass
 
   def __call__(
       self,

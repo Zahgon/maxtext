@@ -95,15 +95,7 @@ def kv_donor_layer_idx(
   A shared layer reuses K/V from the last non-shared layer of the same
   attention type.
   """
-  num_layers = len(layer_types)
-  if not is_kv_shared_layer(layer_idx, num_layers, num_kv_shared_layers):
-    return None
-  first = first_kv_shared_layer_idx(num_layers, num_kv_shared_layers)
-  layer_type = layer_types[layer_idx]
-  for j in range(first - 1, -1, -1):
-    if layer_types[j] == layer_type:
-      return j
-  return None
+  pass
 
 
 def is_kv_donor_layer(
@@ -112,15 +104,7 @@ def is_kv_donor_layer(
     num_kv_shared_layers: int,
 ) -> bool:
   """Returns True iff this layer's K/V are reused by some shared layer."""
-  num_layers = len(layer_types)
-  if layer_idx < 0 or layer_idx >= num_layers:
-    return False
-  if num_kv_shared_layers <= 0:
-    return False
-  for j in range(num_layers):
-    if kv_donor_layer_idx(j, layer_types, num_kv_shared_layers) == layer_idx:
-      return True
-  return False
+  pass
 
 
 class Gemma4SmallPLE(nnx.Module):
@@ -377,12 +361,7 @@ class Gemma4SmallDecoderLayer(nnx.Module):
     Used by the decoder loop on donor layers, so the K / V can be threaded into
     downstream KV-shared layers via ``shared_key`` / ``shared_value``.
     """
-    if self.is_shared:
-      raise ValueError("compute_shared_kv must not be called on a KV-shared layer.")
-    if isinstance(inputs, tuple):
-      inputs = inputs[0]
-    h = self.pre_self_attention_norm(inputs)
-    return self.self_attention.compute_shared_kv(h, inputs_positions=decoder_positions)
+    pass
 
   def __call__(
       self,

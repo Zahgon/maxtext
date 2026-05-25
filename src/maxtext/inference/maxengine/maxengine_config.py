@@ -25,15 +25,8 @@ config_lib, engine_api, _token_utils, _tokenizer_api, _token_params_ns = jetstre
 
 
 # TODO: merge it with the above create_maxengine().
-def create_exp_maxengine(devices: Any, config: Any):
-  if is_decoupled():
-    return maxengine.MaxEngine(config)
-  return maxengine.MaxEngine(config=config, devices=devices)
 
 
-def create_maxengine(devices: Any, config: Any) -> engine_api.Engine:
-  del devices
-  return maxengine.MaxEngine(config)
 
 
 def get_server_config(config_str: str, config: Any):

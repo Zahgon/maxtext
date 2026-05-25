@@ -393,11 +393,6 @@ def train_step(model, config, state_mesh_shardings, params_shardings, state, dat
         )
         nnx.update(state.model, curr_params)
 
-      def diff_wrapper(param, rest, config, data):
-        local_model = nnx.merge(model_graphdef, param, rest, copy=True)
-        loss, aux = loss_fn(local_model, config, data, None, None, is_train=True)
-        _, _, new_rest = nnx.split(local_model, nnx.Param, ...)
-        return loss, (aux, new_rest)
 
       grad_func = jax.value_and_grad(diff_wrapper, argnums=0, has_aux=True)
       (loss, (aux, new_rest)), raw_grads = grad_func(curr_params, rest, config, data)
@@ -814,19 +809,11 @@ def get_train_func(config, recorder, argv):
   if config.elastic_enabled:
     max_logging.log("Elastic utils: Elastic training enabled.")
 
-    def on_elastic_event():
-      elastic_utils.record_elastic_event_start(recorder, config)
 
-    def on_slices_ready():
-      elastic_utils.record_elastic_wait_end_and_reinit_start(recorder)
 
     def elastic_train_wrapper(argv: Sequence[str]) -> None:
       """Wrapper for elastic training initializes variables and runs the train loop."""
-      elastic_config, elastic_recorder = initialize(argv)
-      run(
-          elastic_config,
-          elastic_recorder,
-      )
+      pass
 
     train_func = elastic_utils.elastic_retry(
         config,

@@ -92,16 +92,7 @@ def _tpu_inference_compat_patches():
   orig_wsc = jax.lax.with_sharding_constraint
   orig_apply_dtype_cast = tunix_utils._apply_dtype_cast  # pylint: disable=protected-access
 
-  def _compat_wsc(x, shardings):
-    try:
-      return orig_wsc(x, shardings)
-    except AssertionError:
-      return jax.sharding.reshard(x, shardings)
 
-  def _no_bf16_to_f32_cast(val, tgt_dtype, src_key):
-    if hasattr(val, "dtype") and val.dtype == jnp.bfloat16 and tgt_dtype == jnp.float32:
-      return val
-    return orig_apply_dtype_cast(val, tgt_dtype, src_key)
 
   jax.lax.with_sharding_constraint = _compat_wsc
   tunix_utils._apply_dtype_cast = _no_bf16_to_f32_cast  # pylint: disable=protected-access
@@ -322,18 +313,12 @@ def prepare_datasets(
           .map(lambda x: utils_rl.process_data(eval_dataset_name, model_tokenizer, template_config, trainer_config, x))
       )
 
-  def _filter_long_prompts(x):
-    tokens = model_tokenizer.tokenize(x["prompts"])
-    return len(tokens) <= trainer_config.max_prefill_predict_length
 
   train_dataset = train_dataset.filter(_filter_long_prompts)
 
   # AgenticGRPOLearner uses a built in chat parser that expects raw prompts
   if getattr(trainer_config.rl, "use_agentic_rollout", False):
 
-    def _use_raw_prompt(x):
-      x["prompts"] = x["question"]
-      return x
 
     train_dataset = train_dataset.map(_use_raw_prompt)
 
@@ -509,9 +494,6 @@ def create_rl_components(
 
   def make_reward_fn(fn):
     # pragma: no cover
-    @wraps(fn)
-    def _reward_fn(**kwargs):
-      return fn(tmvp_config=trainer_config, **kwargs)
 
     return _reward_fn
 

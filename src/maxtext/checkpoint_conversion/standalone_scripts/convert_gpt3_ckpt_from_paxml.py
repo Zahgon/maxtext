@@ -215,9 +215,6 @@ def convert(paxml_ckpt_path, maxtext_model_name, base_output_directory, run_name
         transform_fn,
     )
 
-  def verify_fn(key_path, _):
-    keystr = jax.tree_util.keystr(key_path)
-    assert keystr in state_map, f"{keystr} not found"
 
   jax.tree_util.tree_map_with_path(verify_fn, state)
 

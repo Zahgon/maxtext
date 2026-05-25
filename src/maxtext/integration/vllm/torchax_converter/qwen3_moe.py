@@ -113,40 +113,6 @@ class Qwen3MaxTextToVLLMConverter(BaseMaxTextToVLLMConverter):
   def _make_attn_compute(tp: int):
     """Build the cached JIT that packs QKV and output projections for a TP size."""
 
-    @jax.jit
-    def _compute(attn):
-      q = jnp.transpose(attn["query"]["kernel"], (1, 0, 2, 3))
-      k = jnp.transpose(attn["key"]["kernel"], (1, 0, 2, 3))
-      v = jnp.transpose(attn["value"]["kernel"], (1, 0, 2, 3))
-
-      num_q_heads = q.shape[2]
-      num_kv_heads = k.shape[2]
-      head_dim = q.shape[3]
-      num_layers, d_model = q.shape[0], q.shape[1]
-
-      kv_per_tp = num_kv_heads // tp
-      q_per_tp = num_q_heads // tp
-
-      q_by_tp = q.reshape(num_layers, d_model, tp, q_per_tp, head_dim)
-      k_by_tp = k.reshape(num_layers, d_model, tp, kv_per_tp, head_dim)
-      v_by_tp = v.reshape(num_layers, d_model, tp, kv_per_tp, head_dim)
-
-      qkv_by_tp = jnp.concatenate([q_by_tp, k_by_tp, v_by_tp], axis=3)
-      qkv_flat = qkv_by_tp.reshape(num_layers, d_model, -1)
-      qkv_proj = jnp.transpose(qkv_flat, (0, 2, 1))
-
-      o = jnp.transpose(attn["out"]["kernel"], (1, 3, 0, 2))
-      o_proj = o.reshape(o.shape[0], o.shape[1], -1)
-
-      q_norm = jnp.transpose(attn["query_norm"]["scale"], (1, 0))
-      k_norm = jnp.transpose(attn["key_norm"]["scale"], (1, 0))
-
-      return {
-          "self_attn.qkv_proj.weight": jnp.unstack(qkv_proj),
-          "self_attn.o_proj.weight": jnp.unstack(o_proj),
-          "self_attn.q_norm.weight": jnp.unstack(q_norm),
-          "self_attn.k_norm.weight": jnp.unstack(k_norm),
-      }
 
     return _compute
 
@@ -185,31 +151,6 @@ class Qwen3MaxTextToVLLMConverter(BaseMaxTextToVLLMConverter):
   def _make_fuse_all(tp: int):
     """Build the cached JIT that fuses all expert gate and up weights."""
 
-    @jax.jit
-    def _fuse_all(wi_0, wi_1):
-      wi_0 = jnp.transpose(wi_0, (1, 0, 2, 3))
-      wi_1 = jnp.transpose(wi_1, (1, 0, 2, 3))
-
-      def _fuse_single(w0, w1):
-        # [e, d_model, d_inner] -> [e, 2*padded_chunk_size*tp, d_model]
-        w0 = jnp.transpose(w0, (0, 2, 1))
-        w1 = jnp.transpose(w1, (0, 2, 1))
-        num_experts, d_inner, d_model = w0.shape
-        chunk_size = d_inner // tp
-        # Pad each TP chunk to the next multiple of 128 for TPU GMM alignment,
-        # matching process_w13_for_gmm in tpu_inference.
-        # Example: d_inner=768 gives chunk=192 -> 256 with tp=4, or 96 -> 128 with tp=8.
-        padded_chunk_size = ((chunk_size + 127) // 128) * 128
-        pad_amount = padded_chunk_size - chunk_size
-        gate_chunks = w0.reshape(num_experts, tp, chunk_size, d_model)
-        up_chunks = w1.reshape(num_experts, tp, chunk_size, d_model)
-        if pad_amount > 0:
-          gate_chunks = jnp.pad(gate_chunks, ((0, 0), (0, 0), (0, pad_amount), (0, 0)))
-          up_chunks = jnp.pad(up_chunks, ((0, 0), (0, 0), (0, pad_amount), (0, 0)))
-        combined = jnp.stack([gate_chunks, up_chunks], axis=2)
-        return combined.reshape(num_experts, 2 * padded_chunk_size * tp, d_model)
-
-      return jax.vmap(_fuse_single)(wi_0, wi_1)
 
     return _fuse_all
 

@@ -175,28 +175,7 @@ class Indexer(nnx.Module):
 
   def update_indexer_cache(self, kv_cache, k, decoder_segment_ids, model_mode, previous_chunk):
     """Updates Indexer buffers by processing KV cache results."""
-    k_expanded = k[:, :, jnp.newaxis, :]
-    p_res, a_res = kv_cache(
-        key=k_expanded,
-        value=k_expanded,
-        decoder_segment_ids=decoder_segment_ids,
-        model_mode=model_mode,
-        use_ragged_attention=self.config.use_ragged_attention,
-        previous_chunk=previous_chunk,
-    )
-
-    # Filter out None values to handle PREFILL vs AR modes uniformly
-    active_results = [res for res in [p_res, a_res] if res is not None]
-
-    if not active_results:
-      return None, None
-
-    # Extract keys (index 0) and segment IDs (index 2)
-    keys = jnp.concatenate([res[0] for res in active_results], axis=1)
-    segs = jnp.concatenate([res[2] for res in active_results], axis=1)
-
-    # squeeze(2) removes the jnp.newaxis added above
-    return keys.squeeze(2), segs
+    pass
 
   def apply_partial_rope(
       self,
@@ -216,12 +195,7 @@ class Indexer(nnx.Module):
     Returns:
       Array with partial RoPE applied, with shape [batch, seqlen, indexer_n_heads, indexer_head_dim]
     """
-    # indexer_head_dim -> [rope_head_dim, indexer_head_dim - rope_head_dim]
-    x_pe, x_nope = jnp.split(inputs, [self.rope_head_dim], axis=-1)
-    # x_pe [B, S, H, rope_head_dim], positions [B, S]
-    x_pe = self.rotary_embedding(x_pe, position=inputs_positions)
-    x = jnp.concatenate([x_pe, x_nope], axis=-1)
-    return x
+    pass
 
   def generate_mask(self, topk_indices, s):
     """
@@ -234,15 +208,7 @@ class Indexer(nnx.Module):
     Returns:
         mask: [b, t, s] - `0.0` at topk_indices, `DEFAULT_MASK_VALUE` (large negative) elsewhere.
     """
-    # 1. Create a range [0, 1, ..., s-1]
-    # 2. Broadcast compare against [b, t, k] to get [b, t, k, s]
-    # 3. Use .any() to see if a s-index is present in any of the k slots
-    is_topk = (jnp.arange(s) == topk_indices[..., None]).any(axis=-2)
-    # 4. Use where to select between 0.0 and the mask value
-    # cast values to dtype
-    val_true = jnp.array(0.0, dtype=self.dtype)
-    val_false = jnp.array(DEFAULT_MASK_VALUE, dtype=self.dtype)
-    return jnp.where(is_topk, val_true, val_false)
+    pass
 
   def __call__(
       self,
@@ -453,69 +419,7 @@ def mla_as_linen(
   This function serves as a bridge to use the NNX-based `MLA` within a
   Linen model.
   """
-  return nnx_wrappers.to_linen(
-      MLA,
-      config=config,
-      num_query_heads=num_query_heads,
-      num_kv_heads=num_kv_heads,
-      head_dim=head_dim,
-      max_target_length=max_target_length,
-      mesh=mesh,
-      attention_kernel=attention_kernel,
-      inputs_q_shape=inputs_q_shape,
-      inputs_kv_shape=inputs_kv_shape,
-      dtype=dtype,
-      weight_dtype=weight_dtype,
-      max_prefill_predict_length=max_prefill_predict_length,
-      dropout_rate=dropout_rate,
-      kernel_init=kernel_init,
-      float32_qk_product=float32_qk_product,
-      float32_logits=float32_logits,
-      quant=quant,
-      kv_quant=kv_quant,
-      attention_type=attention_type,
-      attn_logits_soft_cap=attn_logits_soft_cap,
-      sliding_window_size=sliding_window_size,
-      use_ragged_attention=use_ragged_attention,
-      ragged_block_size=ragged_block_size,
-      use_qk_norm=use_qk_norm,
-      query_pre_attn_scalar=query_pre_attn_scalar,
-      use_bias_in_projections=use_bias_in_projections,
-      temperature_tuning=temperature_tuning,
-      temperature_tuning_scale=temperature_tuning_scale,
-      temperature_tuning_floor_scale=temperature_tuning_floor_scale,
-      prefill_query_axis_names=prefill_query_axis_names,
-      prefill_key_axis_names=prefill_key_axis_names,
-      prefill_value_axis_names=prefill_value_axis_names,
-      query_axis_names=query_axis_names,
-      key_axis_names=key_axis_names,
-      value_axis_names=value_axis_names,
-      input_axis_names=input_axis_names,
-      out_axis_names=out_axis_names,
-      prefill_input_axis_names=prefill_input_axis_names,
-      decode_input_axis_names=decode_input_axis_names,
-      prefill_out_axis_names=prefill_out_axis_names,
-      decode_out_axis_names=decode_out_axis_names,
-      prefill_cache_axis_order=prefill_cache_axis_order,
-      ar_cache_axis_order=ar_cache_axis_order,
-      compute_axis_order=compute_axis_order,
-      reshape_q=reshape_q,
-      is_nope_layer=is_nope_layer,
-      is_vision=is_vision,
-      model_mode=model_mode,
-      q_lora_rank=q_lora_rank,
-      kv_lora_rank=kv_lora_rank,
-      qk_nope_head_dim=qk_nope_head_dim,
-      qk_rope_head_dim=qk_rope_head_dim,
-      v_head_dim=v_head_dim,
-      max_position_embeddings=max_position_embeddings,
-      original_max_position_embeddings=original_max_position_embeddings,
-      mscale=mscale,
-      rope_factor=rope_factor,
-      name=name,
-      metadata_fn=variable_to_logically_partitioned,
-      abstract_init=False,
-  )
+  pass
 
 
 class MLA(Attention):
@@ -850,78 +754,16 @@ class MLA(Attention):
           rngs=self.rngs,
       )
 
-  @property
-  def out_head_dim(self) -> int:
-    return self.v_head_dim
 
   def mla_query_projection(
       self, inputs_q: Array, inputs_positions: Array, model_mode
   ) -> tuple[jax.Array, Optional[jax.Array]]:
     """Query projection for MLA, e.g. includes LoRA if q_lora_rank > 0."""
-    # specify query logical name
-    if model_mode == MODEL_MODE_PREFILL:
-      query_logical_name = self.prefill_query_axis_names
-      wqa_logical_name = (PREFILL_KV_BATCH, PREFILL_LENGTH, Q_LORA_UP_PROJ)
-    else:
-      query_logical_name = self.query_axis_names
-      wqa_logical_name = (KV_BATCH, LENGTH, Q_LORA_UP_PROJ)
-    query_sharding = create_sharding(self.mesh, query_logical_name)
-    wqa_out_sharding = create_sharding(self.mesh, wqa_logical_name)
-    # Set softmax scaling.
-    self.qk_head_dim = self.qk_nope_head_dim + self.qk_rope_head_dim
-    self.softmax_scale = self.qk_head_dim**-0.5
-    if self.max_position_embeddings > self.original_max_position_embeddings:
-      mscale = 0.1 * self.mscale * math.log(self.rope_factor) + 1.0
-      self.softmax_scale = self.softmax_scale * mscale * mscale
-
-    # Low-rank latent vector for queries. This is also accessed by indexer.
-    low_rank_q = None
-
-    if self.q_lora_rank == 0:
-      q = self.query(inputs_q, out_sharding=query_sharding)
-    else:
-      # LoRA path
-      low_rank_q = self.wq_a(inputs_q, out_sharding=wqa_out_sharding)  # [B, L, q_lora_rank]
-      low_rank_q = checkpoint_name(low_rank_q, "query_wa_proj")
-      low_rank_q = self.q_norm(low_rank_q)  # RMSNorm on low rank
-      low_rank_q = checkpoint_name(low_rank_q, "mla_q")
-      q = self.wq_b(low_rank_q, out_sharding=query_sharding)  # [B, L, n_heads, qk_head_dim]
-
-    # Partial RoPE: Split into non-positional and rotary parts.
-    # last dimension: qk_nope_head_dim, qk_rope_head_dim
-    q_nope, q_pe = jnp.split(q, [self.qk_nope_head_dim], axis=-1)
-    q_nope = self._maybe_shard_with_logical(q_nope, query_logical_name)
-    q_pe = self.apply_rotary_embedding(q_pe, inputs_positions=inputs_positions)
-    q_pe = self._maybe_shard_with_logical(q_pe, query_logical_name)
-    # Query projection is scaled by self.softmax_scale to be consistent MaxText implementation.
-    # DeepSeek v3 was doing it in attention score computation.
-    query = jnp.concatenate([q_nope, q_pe], axis=-1) * self.softmax_scale
-    query = self._maybe_shard_with_logical(query, query_logical_name)
-    return query, low_rank_q
+    pass
 
   def mla_get_key_value(self, low_rank_main, key_rope, model_mode):
     """get (key,value) pair from mla"""
-    if model_mode == MODEL_MODE_PREFILL:
-      key_logical_name = self.prefill_key_axis_names
-      value_logical_name = self.prefill_value_axis_names
-    else:
-      key_logical_name = self.key_axis_names
-      value_logical_name = self.value_axis_names
-
-    wkva_out_sharding = create_sharding(self.mesh, key_logical_name)
-    kv_out = self.wkv_b(low_rank_main, out_sharding=wkva_out_sharding)
-
-    # Split kv_out into key_nope and value parts.
-    key_nope, value = jnp.split(kv_out, [self.qk_nope_head_dim], axis=-1)
-    key_rope = jnp.broadcast_to(key_rope, (key_nope.shape[0], key_nope.shape[1], self.num_query_heads, key_rope.shape[3]))
-    key_nope = self._maybe_shard_with_logical(key_nope, key_logical_name)
-    key_rope = self._maybe_shard_with_logical(key_rope, key_logical_name)
-
-    key = jnp.concatenate([key_nope, key_rope], axis=-1)
-
-    key = self._maybe_shard_with_logical(key, key_logical_name)
-    value = self._maybe_shard_with_logical(value, value_logical_name)
-    return key, value
+    pass
 
   def init_mla_kv_caches(self, inputs_kv_shape: Tuple):
     """Initializes MlaKVCache.
@@ -983,58 +825,11 @@ class MLA(Attention):
       - The prefill key-value cache, reconstructed from the MLA cache, or None.
       - The autoregressive key-value cache, reconstructed from the MLA cache, or None.
     """
-
-    prefill_mla_cache, ar_mla_cache = self.MlaKVCache_0(
-        key_latent=low_rank_main,
-        key_rope=key_rope,
-        decoder_segment_ids=decoder_segment_ids,
-        model_mode=model_mode,
-        use_ragged_attention=self.use_ragged_attention,
-        previous_chunk=previous_chunk,
-    )
-
-    if prefill_mla_cache:
-      low_rank_main, key_rope, decoder_segment_ids = prefill_mla_cache
-      key, value = self.mla_get_key_value(low_rank_main, key_rope, model_mode)
-      prefill_kv_cache = key, value, decoder_segment_ids
-    else:
-      prefill_kv_cache = None
-
-    if ar_mla_cache:
-      low_rank_main, key_rope, decoder_segment_ids, lengths = ar_mla_cache
-      key, value = self.mla_get_key_value(low_rank_main, key_rope, model_mode)
-      ar_kv_cache = key, value, decoder_segment_ids, lengths
-    else:
-      ar_kv_cache = None
-    return [prefill_kv_cache, ar_kv_cache]
+    pass
 
   def mla_kv_projection(self, inputs: Array, inputs_positions: Array, decoder_segment_ids, model_mode, previous_chunk):
     """MLA key/value projection with integrated rotary embedding."""
-    if model_mode == MODEL_MODE_PREFILL:
-      wka_logical_name = (PREFILL_KV_BATCH, PREFILL_LENGTH, KV_LORA_UP_PROJ)
-    else:
-      wka_logical_name = (KV_BATCH, LENGTH, KV_LORA_UP_PROJ)
-    wkva_out_sharding = create_sharding(self.mesh, wka_logical_name)
-    low_rank = self.wkv_a(inputs, out_sharding=wkva_out_sharding)
-    low_rank = checkpoint_name(low_rank, "kv_wa_proj")
-    low_rank_main, low_rank_rope = jnp.split(low_rank, [self.kv_lora_rank], axis=-1)
-    low_rank_main = self.kv_norm(low_rank_main)
-    low_rank_main = checkpoint_name(low_rank_main, "mla_kv")
-    # Apply rotary embedding to key_rope.
-    key_rope = jnp.expand_dims(low_rank_rope, axis=2)
-    key_rope = self.apply_rotary_embedding(key_rope, inputs_positions=inputs_positions)
-
-    key, value = self.mla_get_key_value(low_rank_main, key_rope, model_mode)
-    cached_values = [None, None]
-    if self.config.attention != "paged" and model_mode != MODEL_MODE_TRAIN:
-      if self.config.mla_naive_kvcache:
-        cached_values = self.update_kv_caches(key, value, decoder_segment_ids, model_mode, previous_chunk)
-      else:
-        cached_values = self.update_mla_kv_caches(
-            low_rank_main, key_rope, decoder_segment_ids, model_mode, previous_chunk
-        )
-
-    return key, value, cached_values
+    pass
 
   def calculate_indexer_loss(
       self,
@@ -1073,40 +868,7 @@ class MLA(Attention):
     Returns:
       The computed KL divergence loss.
     """
-    # Detach main model components from the computational graph.
-    # The indexer should match the main model, but the main model should not be influenced
-    # by the indexer's learning progress via this loss in sparse training stage.
-    # We also apply this during the Dense Warm-up stage to save compute and memory.
-    query = jax.lax.stop_gradient(query)
-    key = jax.lax.stop_gradient(key)
-
-    # Compute attention scores: [b, t, h, d] @ [b, s, h, d] -> [b, h, t, s]
-    attention_scores = jnp.einsum("bthd, bshd -> bhts", query, key, precision=self.config.matmul_precision)
-
-    if sparse_loss:
-      # indexer_mask is already pre-filtered with the attention_mask if any
-      attention_scores = attention_scores + indexer_mask[:, None, :, :]
-      indexer_score = indexer_score + indexer_mask
-    elif attention_mask is not None:
-      # indexer_score already applies attention_mask; updating attention_scores only
-      attention_scores = attention_scores + attention_mask[:, None, :, :]
-
-    # Use float32 for softmax numerical stability.
-    attention_probs = jax.nn.softmax(attention_scores.astype(jnp.float32), axis=-1)
-    indexer_probs = jax.nn.softmax(indexer_score.astype(jnp.float32), axis=-1)
-
-    # Aggregate heads: [b, h, t, s] -> [b, t, s]
-    attention_probs = jnp.sum(attention_probs, axis=1)
-    # L1 normalize aggregated target distribution
-    attention_probs = attention_probs / (jnp.sum(attention_probs, axis=-1, keepdims=True) + EPS)
-
-    # KL Divergence: KL(attention || indexer)
-    log_attention_probs = jnp.log(attention_probs + EPS)
-    log_indexer_probs = jnp.log(indexer_probs + EPS)
-    kl_per_token = attention_probs * (log_attention_probs - log_indexer_probs)
-    indexer_loss = jnp.mean(jnp.sum(kl_per_token, axis=-1))
-
-    return indexer_loss * scaling_factor
+    pass
 
   def __call__(
       self,

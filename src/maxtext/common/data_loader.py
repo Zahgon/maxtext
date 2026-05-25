@@ -124,32 +124,11 @@ class RampUpDataLoader(DataLoader):
       old_buffer, self.batch_buffer = self.batch_buffer, super().load_next_batch_pre_sharding()
 
       # self.global_batch_size_end is batch_buffer size
-      def _slice_and_concat(old_data, new_data):
-        sliced_old_data = jax.lax.dynamic_slice_in_dim(
-            old_data,
-            slice_start,
-            rampup_manager.global_batch_size_end - slice_start,
-            axis=0,
-        )
-        sliced_new_data = jax.lax.dynamic_slice_in_dim(
-            new_data,
-            0,
-            slice_end - rampup_manager.global_batch_size_end,
-            axis=0,
-        )
-        return jax.lax.concatenate((sliced_old_data, sliced_new_data), dimension=0)
 
       self.buffer_start = slice_end - rampup_manager.global_batch_size_end
       output = jax.tree.map(_slice_and_concat, old_buffer, self.batch_buffer)
     else:
 
-      def _slice(data):
-        return jax.lax.dynamic_slice_in_dim(
-            data,
-            slice_start,
-            rampup_manager.global_batch_size_current,
-            axis=0,
-        )
 
       self.buffer_start = slice_end
       output = jax.tree.map(_slice, self.batch_buffer)

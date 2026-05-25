@@ -125,8 +125,6 @@ def _zero_pad_axis(arr, axis, extra):
       per_shard_extra = extra // shards_along_axis
       pad_width[axis] = (0, per_shard_extra)
 
-      def _pad_local(x):
-        return jnp.pad(x, pad_width)
 
       return jax.shard_map(_pad_local, mesh=sharding.mesh, in_specs=spec, out_specs=spec, check_vma=False)(arr)
 
@@ -240,60 +238,6 @@ def _fuse_moe_weights(ckpt_tree, model_arrays_tree):
         return None
     return node
 
-  def _maybe_fuse(path, ckpt_node):
-    if not _is_fusion_site(ckpt_node):
-      return ckpt_node
-    model_node = _lookup_model(path)
-    if not isinstance(model_node, dict) or "wi" not in model_node:
-      return ckpt_node
-
-    wi_model = model_node["wi"]
-    axis = wi_model.ndim - 1
-
-    # Determine the number of shards (TP degree) along the concatenated axis
-    n_shards = 1
-    sharding = getattr(wi_model, "sharding", None)
-    if isinstance(sharding, jax.sharding.NamedSharding):
-      spec = sharding.spec
-      partition = spec[axis] if axis < len(spec) else None
-      n_shards = _partition_size(partition, sharding.mesh)
-
-    # Target size for a single half (wi_0 or wi_1) AFTER padding
-    target_half_dim = wi_model.shape[-1] // 2
-
-    # Helper to pad per-shard and reshape for interleaving
-    def _pad_and_chunk(arr, target_total_size):
-      shape = arr.shape
-      current_total_size = shape[-1]
-
-      # Calculate per-shard chunk sizes
-      chunk_size = current_total_size // n_shards
-      target_chunk_size = target_total_size // n_shards
-      pad_amount = target_chunk_size - chunk_size
-
-      # Reshape to expose the per-shard chunk: (..., n_shards, chunk_size)
-      arr_reshaped = arr.reshape(*shape[:-1], n_shards, chunk_size)
-
-      # Pad each chunk individually if necessary
-      if pad_amount > 0:
-        pad_widths = [(0, 0)] * arr_reshaped.ndim
-        pad_widths[-1] = (0, pad_amount)
-        arr_reshaped = jnp.pad(arr_reshaped, pad_widths)
-
-      return arr_reshaped
-
-    # Apply per-shard padding and chunking
-    padded_chunked_wi_0 = _pad_and_chunk(ckpt_node["wi_0"], target_half_dim)
-    padded_chunked_wi_1 = _pad_and_chunk(ckpt_node["wi_1"], target_half_dim)
-
-    # Concatenate along the inner chunk dimension to interleave the shards
-    # Shape becomes: (..., n_shards, target_chunk_size * 2)
-    wi_interleaved = jnp.concatenate([padded_chunked_wi_0, padded_chunked_wi_1], axis=-1)
-
-    # Flatten the n_shards dimension back out to match the final model shape, drop wi_0/wi_1.
-    new_node = {k: v for k, v in ckpt_node.items() if k not in ("wi_0", "wi_1")}
-    new_node["wi"] = wi_interleaved.reshape(*wi_model.shape)
-    return new_node
 
   return jax.tree_util.tree_map_with_path(_maybe_fuse, ckpt_tree, is_leaf=_is_fusion_site)
 
@@ -383,38 +327,6 @@ def _fix_restore_args_for_shape_mismatch(restore_args, stored_metadata_tree, mes
   missing_paths = []  # paths in model that are absent from the checkpoint tree
   found_array_count = [0]
 
-  def _fix_one(path, restore_arg):
-    if not isinstance(restore_arg, ocp.ArrayRestoreArgs):
-      return restore_arg
-    stored_meta = _lookup_stored_meta(path)
-    if stored_meta is None:
-      missing_paths.append(f"  {'.'.join(_key_str(k) for k in path)}")
-      return restore_arg
-    if _is_orbax_array_metadata(stored_meta):
-      stored_shape = tuple(stored_meta.shape)
-      if restore_arg.global_shape is not None and restore_arg.global_shape != stored_shape:
-        # Check for scanned vs unscanned rank mismatch
-        if len(stored_shape) != len(restore_arg.global_shape):
-          rank_mismatched_paths.append(
-              f"  {'.'.join(_key_str(k) for k in path)}: "
-              f"checkpoint shape {stored_shape} (rank {len(stored_shape)}) "
-              f"vs model shape {restore_arg.global_shape} (rank {len(restore_arg.global_shape)})"
-          )
-        else:
-          # Handle the shape mismatch logic for padding/sharding
-          found_array_count[0] += 1
-          path_str = f"  {'.'.join(_key_str(k) for k in path)}: stored={stored_shape} -> model={restore_arg.global_shape}"
-          if _stored_shape_evenly_shardable(restore_arg, stored_shape):
-            mismatched_paths_sharded.append(path_str)
-            return dataclasses.replace(restore_arg, global_shape=stored_shape, shape=stored_shape)
-
-          mismatched_paths_replicated.append(path_str)
-          return dataclasses.replace(
-              restore_arg, global_shape=None, shape=None, sharding=replicated, mesh=None, mesh_axes=None
-          )
-      else:
-        found_array_count[0] += 1
-    return restore_arg
 
   fixed = jax.tree_util.tree_map_with_path(_fix_one, restore_args, is_leaf=lambda x: isinstance(x, ocp.ArrayRestoreArgs))
 
@@ -532,9 +444,6 @@ def create_model(config, mesh, model_mode: str = MODEL_MODE_TRAIN, rngs: nnx.Rng
 
 def get_nnx_create_model_fn(config, mesh=None, devices=None, model_mode=MODEL_MODE_TRAIN, rng_key=None) -> Callable:
 
-  def _create_model():
-    rngs = maxtext_utils_nnx.create_nnx_rngs(config, model_mode=model_mode, rng_key=rng_key)
-    return from_config(config, devices, mesh, rngs=rngs, model_mode=model_mode)
 
   return _create_model
 
@@ -942,16 +851,6 @@ def from_pretrained(
           restore_args = {"base": restore_args} if has_base_key else restore_args
 
         # Free memory used by initial sharded_state before restore, to make room for the incoming checkpoint arrays.
-        def _free_device_memory(node):
-          if isinstance(node, nnx.Variable) and not isinstance(node, nnx.RngState):
-            val = node[...]
-          else:
-            val = node
-
-          if isinstance(val, jax.Array) and not val.is_deleted():
-            val.delete()
-
-          return node
 
         jax.tree_util.tree_map(_free_device_memory, sharded_state, is_leaf=lambda n: isinstance(n, nnx.Variable))
 

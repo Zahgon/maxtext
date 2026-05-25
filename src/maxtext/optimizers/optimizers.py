@@ -31,14 +31,6 @@ def _get_path_mask_fn(patterns, match_returns_true=True):
 
   compiled_patterns = [re.compile(pattern) for pattern in patterns]
 
-  def mask_fn(params):
-    def _is_masked(path, _):
-      # Join path keys into a single string for pattern matching (e.g., "layer1/bias")
-      path_str = jax.tree_util.keystr(path, simple=True, separator="/")
-      matched = any(pattern.search(path_str) for pattern in compiled_patterns)
-      return matched if match_returns_true else not matched
-
-    return jax.tree_util.tree_map_with_path(_is_masked, params)
 
   return mask_fn
 
@@ -95,72 +87,6 @@ def skip_step_on_spikes(
         "is_skipped": jnp.array(False, dtype=jnp.bool_),
     }
 
-  def update_fn(updates, state, params=None, **extra_args):
-    # Using `pop()` removes `loss` and `grad_norm` from `extra_args` before they are
-    # passed downstream to `inner_opt.update()`. This prevents `TypeError` if the
-    # inner optimizer doesn't explicitly accept these as `kwargs`.
-    loss = extra_args.pop("loss", None)
-    grad_norm = extra_args.pop("grad_norm", None)
-
-    # Fallback to standard update if loss is not provided
-    if loss is None:
-      inner_updates, new_inner_state = inner_opt.update(updates, state["inner_state"], params, **extra_args)
-      return inner_updates, {
-          "inner_state": new_inner_state,
-          "losses": state["losses"],
-          "grad_norms": state["grad_norms"],
-          "count": state["count"],
-          "is_skipped": jnp.array(False, dtype=jnp.bool_),
-      }
-
-    count = state["count"]
-    losses = state["losses"]
-    grad_norms = state["grad_norms"]
-
-    # Compute rolling stats
-    loss_mean, loss_std = _compute_rolling_stats(losses, count, interval)
-    grad_norm_mean, grad_norm_std = _compute_rolling_stats(grad_norms, count, interval)
-
-    # Check if the current metrics are within the allowed thresholds
-    is_loss_ok = (loss - loss_mean) <= scaling_factor * loss_std
-    if grad_norm is not None:
-      is_grad_norm_ok = (grad_norm - grad_norm_mean) <= scaling_factor * grad_norm_std
-      is_ok = jnp.logical_and(is_loss_ok, is_grad_norm_ok)
-    else:
-      is_ok = is_loss_ok
-
-    # Only enforce skip if we have at least half the interval filled (or 2 elements minimum)
-    min_history = max(2, interval // 2)
-    is_warmup = (count + 1) < min_history
-    is_ok = jnp.logical_or(is_warmup, is_ok)
-
-    # Conditionally execute the inner optimizer to prevent momentum poisoning
-    def do_update():
-      return inner_opt.update(updates, state["inner_state"], params, **extra_args)
-
-    def skip_update():
-      # b/500923599: Investigate logging compatible with jax.jit, jax.lax.cond, and Pathway
-      inner_updates = jax.tree_util.tree_map(jnp.zeros_like, updates)
-      return inner_updates, state["inner_state"]
-
-    inner_updates, new_inner_state = jax.lax.cond(is_ok, do_update, skip_update)
-
-    # Update rolling buffers (append even if skipped so spikes can become the new baseline)
-    idx = count % interval
-    new_losses = losses.at[idx].set(loss)
-
-    new_grad_norms = grad_norms
-    if grad_norm is not None:
-      new_grad_norms = grad_norms.at[idx].set(grad_norm)
-
-    new_state = {
-        "inner_state": new_inner_state,
-        "losses": new_losses,
-        "grad_norms": new_grad_norms,
-        "count": count + 1,
-        "is_skipped": jnp.logical_not(is_ok),
-    }
-    return inner_updates, new_state
 
   return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
@@ -298,51 +224,5 @@ def adam_pax(
     t = step.astype(jnp.float32) + 1.0
     return decay * (1.0 - jnp.power(decay, t - 1.0)) / (1.0 - jnp.power(decay, t))
 
-  def update_fn(updates, state, params=None):
-    # Sanitize updates just in case.
-    if weight_decay > 0:
-      assert params is not None
-    count = state.count
-
-    class _slot_opt_state:
-
-      def __init__(self, mu, nu):
-        self.mu = mu
-        self.nu = nu
-
-    def _update_momentum(update, mu, nu):
-      # The conversion to the data type of the update ensures that bfloat16 remains
-      # bfloat16 in the optimizer state. This conversion has to be done after
-      # `bias_corrected_dacay` is calculated as calculating `jnp.power(decay, t)` in low
-      # precision can result in it being rounded to 1 and subsequently a
-      # "division by zero" error.
-      beta1_decay = bias_corrected_decay(count, beta1).astype(update.dtype)
-      beta2_decay = bias_corrected_decay(count, beta2).astype(update.dtype)
-      mu = (1.0 - beta1_decay) * update + beta1_decay * mu
-      nu = (1.0 - beta2_decay) * (update**2) + beta2_decay * nu
-      return _slot_opt_state(mu=mu, nu=nu)
-
-    updated_moments = jax.tree_util.tree_map(_update_momentum, updates, state.mu, state.nu)
-
-    mu = jax.tree_util.tree_map(lambda x: x.mu, updated_moments)
-    nu = jax.tree_util.tree_map(lambda x: x.nu, updated_moments)
-
-    updates = jax.tree_util.tree_map(lambda mu, nu: mu / (jnp.sqrt(nu + epsilon_root) + epsilon), mu, nu)
-
-    if weight_decay > 0:
-      if mask is not None:
-        mask_tree = mask(params) if callable(mask) else mask
-        updates = jax.tree_util.tree_map(lambda x, v, m: x + weight_decay * v if m else x, updates, params, mask_tree)
-      else:
-        updates = jax.tree_util.tree_map(lambda x, v: x + weight_decay * v, updates, params)
-
-    # learning_rate_fn may be a callable schedule or a scalar (e.g. when wrapped
-    # by optax.inject_hyperparams, it is passed as a pre-evaluated scalar).
-    step_size = -1.0 * (learning_rate_fn(count) if callable(learning_rate_fn) else learning_rate_fn)
-    # Finally, fold in step size.
-    updates = jax.tree_util.tree_map(lambda x: step_size * x, updates)
-
-    updated_states = optax.ScaleByAdamState(count=count + 1, mu=mu, nu=nu)
-    return updates, updated_states
 
   return optax.GradientTransformation(init_fn, update_fn)

@@ -169,15 +169,7 @@ def main(_argv: Sequence[str]) -> None:
         "FF2EMB": 1e-4 * jax.random.normal(keys[1], (D_FF, D_EMB), dtype=jax.numpy.bfloat16),
     }
 
-  def gen_layers(random_key):
-    layers = []
-    for _ in range(NUM_LAYERS):
-      random_key, sub_key = jax.random.split(random_key)
-      layers.append(gen_layer(sub_key))
-    return tuple(layers)
 
-  def gen_data(random_key):
-    return jax.random.uniform(random_key, (BATCH, D_EMB), dtype=jax.numpy.bfloat16)
 
   def multiply_layer(in_act, in_layer):
     with jax.named_scope("M1"):
@@ -198,16 +190,9 @@ def main(_argv: Sequence[str]) -> None:
 
     return x, in_layers
 
-  def multiply_layers_with_loss(in_act, in_layers):
-    x, _ = multiply_layers(in_act, in_layers)
-    return jax.numpy.sum(x)
 
   multiply_layers_and_grad = jax.value_and_grad(multiply_layers_with_loss, argnums=[1])
 
-  def training_step(in_act, in_layers):
-    _, grad_layers = multiply_layers_and_grad(in_act, in_layers)
-    out_layers = jax.tree_util.tree_map(lambda param, grad: param - 1e-4 * grad, in_layers, grad_layers[0])
-    return out_layers
 
   print("finished includes ", flush=True)
 
@@ -245,8 +230,6 @@ def main(_argv: Sequence[str]) -> None:
   deactivate_profiler(args.profiler_path)
 
 
-def parse_flags(argv):
-  return parser.parse_args(argv[1:])
 
 
 if __name__ == "__main__":

@@ -106,14 +106,6 @@ def reshape_first_axis_with_diloco(num_diloco_replicas: int, pytree: PyTree) -> 
       return jax.sharding.PartitionSpec("diloco", (*pspec[0][1:],), (*pspec[1:],))
     return jax.sharding.PartitionSpec("diloco", *pspec)
 
-  def reshape_for_diloco(arr):
-    batch_dim, *example_shape = arr.shape
-    diloco_shape = (num_diloco_replicas, batch_dim // num_diloco_replicas, *example_shape)
-    if hasattr(arr, "sharding"):
-      s = arr.sharding
-      s = jax.sharding.NamedSharding(mesh=s.mesh, spec=extend_pspec(s.spec))
-      return jax.lax.with_sharding_constraint(jnp.reshape(arr, shape=diloco_shape), s)
-    return jnp.reshape(arr, shape=diloco_shape)
 
   return jax.tree.map(reshape_for_diloco, pytree)
 
@@ -140,11 +132,6 @@ def build_abstract_diloco_state(
   """
 
   # Create inner state with diloco dimension prepended to all arrays
-  def add_diloco_dim(x):
-    if hasattr(x, "shape") and hasattr(x, "dtype"):
-      new_shape = (config.num_diloco_replicas,) + tuple(x.shape)
-      return jax.ShapeDtypeStruct(new_shape, x.dtype)
-    return x
 
   inner_state = jax.tree.map(add_diloco_dim, abstract_state)
 
@@ -253,74 +240,11 @@ def build_diloco_train_step(
       nesterov=True,
   )
 
-  def synchronize(state):
-    # Calculate the delta between the current replica's state and the global
-    # state (since last synchronization).
-    broadcast_outer_params = drjax.broadcast(state.params, mesh=mesh)
-    # For NNX, model Param vars live under inner_state.model; for Linen under inner_state.params.
-    inner_model_params = (
-        nnx.filter_state(state.inner_state.model, nnx.Param) if config.pure_nnx else state.inner_state.params
-    )
-    model_delta = jax.tree.map(lambda x, y: y - x, inner_model_params, broadcast_outer_params)
-    # Treat the average delta as the outer optimizer's gradient and apply to
-    # the global (outer) model params.
-    averaged_pseudo_grad = drjax.reduce_mean(model_delta)
-    updates, new_opt_state = outer_optimizer.update(averaged_pseudo_grad, state.outer_opt_state, state.params)
-    new_outer_params = optax.apply_updates(state.params, updates)
-    # Replace inner model params with the new global model params.
-    # NOTE: inner optimizer state is retained despite the change in parameters,
-    # see section 6.1 in https://arxiv.org/pdf/2311.08105.
-    if config.pure_nnx:
-      # For NNX: merge new Param vars back with the non-Param model vars (e.g. RNG state).
-      def replace_nnx_model_params(s, new_params):
-        non_param_model = nnx.filter_state(s.model, nnx.Not(nnx.Param))
-        new_model = nnx.merge_state(non_param_model, new_params)
-        # Assign via __setitem__ so nested States are stored as plain dicts (matching
-        # nnx.state()'s pytree structure). The dict-literal constructor keeps them as
-        # State objects, which makes jax.lax.cond see mismatched pytree structures.
-        result = type(s)({})
-        result["model"] = new_model
-        result["optimizer"] = s["optimizer"]
-        return result
-
-      new_inner_state = drjax.map_fn(
-          lambda s: replace_nnx_model_params(s, new_outer_params),
-          state.inner_state,
-          mesh=mesh,
-      )
-    else:
-      new_inner_state = drjax.map_fn(lambda s: s.replace(params=new_outer_params), state.inner_state, mesh=mesh)
-    return state.replace(
-        params=new_outer_params,
-        outer_opt_state=new_opt_state,
-        inner_state=new_inner_state,
-    )
 
   def typed_reduce_mean(in_tree):
     total = drjax.reduce_sum(in_tree)
     avg = jax.tree.map(lambda x: (x / config.num_diloco_replicas).astype(x.dtype), total)
     return avg
 
-  @drjax.program(placements={"diloco": config.num_diloco_replicas})
-  def diloco_train_step(state, batch, prng):
-    # Broadcast the RNG across replicas.
-    broadcast_rng = drjax.broadcast(prng, mesh=mesh)
-    inner_state, metrics = drjax.map_fn(train_step, (state.inner_state, batch, broadcast_rng), mesh=mesh)
-    avg_metrics = typed_reduce_mean(metrics)
-    # For NNX, the step counter lives at inner_state.optimizer.step; for Linen at inner_state.step.
-    new_step = inner_state.optimizer.step[0] if config.pure_nnx else inner_state.step[0]
-    state = state.replace(
-        inner_state=inner_state,
-        step=new_step,
-    )
-    # Either synchronize the model, or no-op, depending on whether the current
-    # step falls on the synchronization period.
-    state = jax.lax.cond(
-        new_step % config.diloco_sync_period == 0,
-        synchronize,
-        lambda x: x,  # no-op
-        state,
-    )
-    return state, avg_metrics
 
   return diloco_train_step

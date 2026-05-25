@@ -365,24 +365,10 @@ def train_step(model, config, state_mesh_shardings, params_shardings, state, dat
 
   if config.gradient_accumulation_steps > 1:
 
-    def accumulate_gradient(acc_grad_and_loss, data):
-      grad_func = jax.value_and_grad(_loss_fn, argnums=4, has_aux=True)
-      (_, aux), cur_batch_gradient = grad_func(
-          model, config, data, dropout_rng, state.params, *extra_grpo_args, is_train=True
-      )
-      acc_grad_and_loss["loss"] += aux["total_loss"]
-      acc_grad_and_loss["moe_lb_loss"] += aux["moe_lb_loss"]
-      acc_grad_and_loss["grad"] = jax.tree_util.tree_map(
-          lambda x, y: x * aux["total_weights"] + y, cur_batch_gradient, acc_grad_and_loss["grad"]
-      )
-      acc_grad_and_loss["total_weights"] += aux["total_weights"]
-      return acc_grad_and_loss, aux
 
     def reshape_to_microbatch_accumulations(batch_arr):
       """Reshape global batch to microbatches, assuming batch axis is leading."""
-      microbatches = config.gradient_accumulation_steps
-      microbatch_shape = (microbatches, batch_arr.shape[0] // microbatches) + batch_arr.shape[1:]
-      return jnp.reshape(batch_arr, microbatch_shape)
+      pass
 
     data = jax.tree_util.tree_map(reshape_to_microbatch_accumulations, data)
     init_grad = jax.tree_util.tree_map(jnp.zeros_like, state.params)
@@ -744,45 +730,7 @@ def train_loop(config, config_inference, recorder, state=None):
       stop_event: A threading.Event to signal when the worker should stop.
       profiling_event: a threading.Event to signal when to profile.
     """
-    worker_step = 0
-    is_profiling = False
-    while not stop_event.is_set():
-      try:
-        if worker_step == profiler_object.start_initial_profile_step and not is_profiling:
-          profiler_object.activate()
-          is_profiling = True
-        elif worker_step == profiler_object.finished_initial_profile_step and is_profiling:
-          profiler_object.deactivate()
-          is_profiling = False
-        with jax.profiler.StepTraceAnnotation("inference", step_num=worker_step):
-          processed_batch = generate_completions(
-              data_loader,
-              worker_inference_engine,
-              worker_tokenizer_model,
-              worker_config_inference,
-              worker_config_train,
-              worker_input_data_shardings,
-              engine_lock,
-          )
-          jax.block_until_ready(processed_batch)
-
-        with worker_data_buffer_lock:
-          if not worker_data_buffer:
-            worker_data_buffer.append(processed_batch)
-          else:
-            worker_data_buffer[0] = jax.tree_util.tree_map(
-                lambda a, b: np.concatenate([a, b], axis=0),
-                worker_data_buffer[0],
-                processed_batch,
-            )
-        worker_step += 1
-      except StopIteration:
-        max_logging.log("Data iterator exhausted in generation worker. Stopping.")
-        break
-      except Exception as e:  # pylint: disable=broad-except
-        max_logging.log(f"Error in generation worker: {e}")
-        break
-    max_logging.log("Generation worker thread finished.")
+    pass
 
   stop_event = threading.Event()
   inference_engine_lock = threading.Lock()

@@ -69,13 +69,7 @@ def canonicalize_tuple(x):
 
 def _compute_dot_general(inputs, kernel, kernel_axes, axis, contract_ind, matmul_precision, quant):
   """Computes a dot_general operation that may be quantized."""
-  dot_general = lax.dot_general
-  matmul_precision = lax.Precision(matmul_precision)
-  if quant:
-    dot_general_cls = quant.dot_general_cls(mesh_axes=kernel_axes)
-    dot_general = dot_general_cls()
-    return dot_general(inputs, kernel, ((axis, contract_ind), ((), ())), precision=None)
-  return dot_general(inputs, kernel, ((axis, contract_ind), ((), ())), precision=matmul_precision)
+  pass
 
 
 def _compute_dot_general_nnx(
@@ -89,16 +83,7 @@ def _compute_dot_general_nnx(
     out_sharding: NamedSharding | None = None,
 ):
   """Computes a dot_general operation that may be quantized."""
-  dot_general = lax.dot_general
-  matmul_precision = lax.Precision(matmul_precision)
-  if quant_dot_general is not None:
-    if initializing:
-      quant_dot_general.lazy_init(inputs, kernel, ((axis, contract_ind), ((), ())), precision=None)
-    return quant_dot_general(inputs, kernel, ((axis, contract_ind), ((), ())), precision=None, mutable=["aqt"])
-
-  return dot_general(
-      inputs, kernel, ((axis, contract_ind), ((), ())), precision=matmul_precision, out_sharding=out_sharding
-  )
+  pass
 
 
 class DenseGeneral(nnx.Module):
@@ -191,11 +176,6 @@ class DenseGeneral(nnx.Module):
     else:
       self._quant_dot_general_name = None
 
-  @property
-  def quant_dot_general(self) -> nnx_wrappers.ToNNX | None:
-    if self._quant_dot_general_name is None:
-      return None
-    return getattr(self, self._quant_dot_general_name)
 
   def __call__(self, inputs: Array, _initializing: bool = False, out_sharding: NamedSharding | None = None) -> Array:
     """Applies a linear transformation to the inputs along multiple dimensions.
@@ -547,23 +527,4 @@ def mlp_block(
     name: None | str = None,
 ):
   """Creates a MlpBlock Linen module using nnx.bridge.to_linen."""
-  module = nnx_wrappers.to_linen(
-      MlpBlock,
-      config=config,
-      mesh=mesh,
-      in_features=in_features,
-      intermediate_dim=intermediate_dim,
-      activations=activations,
-      kernel_init=kernel_init,
-      intermediate_dropout_rate=intermediate_dropout_rate,
-      dtype=dtype,
-      weight_dtype=weight_dtype,
-      use_bias=use_bias,
-      use_pre_norm=use_pre_norm,
-      quant=quant,
-      model_mode=model_mode,
-      name=name,
-      metadata_fn=variable_to_logically_partitioned,
-      abstract_init=False,
-  )
-  return module
+  pass

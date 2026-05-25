@@ -93,10 +93,6 @@ def gradient_accumulation_loss_and_grad(
   # so that all-gather is done once in the lower precision before the gradient accumulation loop
   if config.shard_optimizer_over_data:
 
-    def convert_to_bf16(param):
-      if param.dtype == jnp.float32:
-        return param.astype(jnp.bfloat16)
-      return param
 
     ga_params = jax.tree_util.tree_map(convert_to_bf16, params)
   else:
@@ -108,36 +104,10 @@ def gradient_accumulation_loss_and_grad(
   else:
     grad_func = jax.value_and_grad(_loss_fn, argnums=4, has_aux=True)
 
-  def accumulate_gradient(acc_grad_and_loss, data):
-    ga_params = acc_grad_and_loss["ga_params"]
-    if is_nnx:
-      # Reconstruct the model using the fixed parameters (ga_params)
-      # and the advancing non-parameter state (RNGs) from the carry.
-      local_model = nnx.merge(graphdef, ga_params, acc_grad_and_loss["rest_state"], copy=True)
-      (_, aux), cur_batch_gradient = grad_func(local_model, config, data, None, None, *extra_dpo_args, is_train=True)
-      _, _, next_rest_state = nnx.split(local_model, nnx.Param, ...)
-      acc_grad_and_loss["rest_state"] = next_rest_state
-    else:
-      rng = (
-          jax.random.fold_in(dropout_rng, acc_grad_and_loss["total_weights"].astype(jnp.int32))
-          if dropout_rng is not None
-          else None
-      )
-      (_, aux), cur_batch_gradient = grad_func(model, config, data, rng, ga_params, *extra_dpo_args, is_train=True)
-    acc_grad_and_loss["loss"] += aux["xent_sum"] + aux.get("dpo_loss", 0.0)
-    acc_grad_and_loss["moe_lb_loss"] += aux["moe_lb_loss"]
-    acc_grad_and_loss["indexer_loss"] += aux["indexer_loss"]
-    acc_grad_and_loss["mtp_loss"] += aux["mtp_loss"]
-    acc_grad_and_loss["grad"] = jax.tree_util.tree_map(lambda x, y: x + y, cur_batch_gradient, acc_grad_and_loss["grad"])
-    acc_grad_and_loss["total_weights"] += aux["total_weights"]
-    return acc_grad_and_loss, aux
 
   def reshape_to_microbatch_accumulations(batch_arr):
     """Reshape global batch to microbatches, assuming batch axis is leading."""
-    num_microbatches = config.gradient_accumulation_steps
-    microbatch_shape = (batch_arr.shape[0] // num_microbatches, num_microbatches) + batch_arr.shape[1:]
-    reshaped_batch_arr = jnp.reshape(batch_arr, microbatch_shape)
-    return jnp.swapaxes(reshaped_batch_arr, 0, 1)
+    pass
 
   data = jax.tree_util.tree_map(reshape_to_microbatch_accumulations, data)
   init_grad = jax.tree_util.tree_map(jnp.zeros_like, ga_params)
@@ -185,11 +155,11 @@ def update_sharding_for_reduced(sharding: NamedSharding) -> NamedSharding:
   """
   Add reduced on data axis of given NamedSharding
   """
-  return sharding.update(spec=sharding.spec.update(reduced={"data"}))
+  pass
 
 
 def update_sharding_for_unreduced(sharding: NamedSharding) -> NamedSharding:
   """
   Add unreduced on data axis of given NamedSharding
   """
-  return sharding.update(spec=sharding.spec.update(unreduced={"data"}))
+  pass

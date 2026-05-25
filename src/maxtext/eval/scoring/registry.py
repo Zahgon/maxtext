@@ -52,4 +52,4 @@ def register_scorer(benchmark_name: str, scorer_fn: Callable[..., dict]) -> None
     benchmark_name: Benchmark identifier.
     scorer_fn: Scorer callable.
   """
-  SCORER_REGISTRY[benchmark_name.lower()] = scorer_fn
+  pass

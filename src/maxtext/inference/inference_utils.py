@@ -59,24 +59,7 @@ def prompt_logprobs_from_packed_prefill(
   - First token of each segment = NaN (no prediction).
   - Tokens at or beyond the true length of their segment = NaN.
   """
-  B, _, _ = logits.shape  # B, S, V
-
-  # Compute next-token logprobs
-  logps = jax.nn.log_softmax(logits[:, :-1, :], axis=-1)  # [B, S-1, V]
-  targets = input_tokens[:, 1:]  # [B, S-1]
-  scored = jnp.take_along_axis(logps, targets[..., None], axis=-1)[..., 0]  # [B, S-1]
-
-  # Shift so index matches token position (pad NaN at t=0)
-  pad = jnp.full((B, 1), jnp.nan, dtype=logits.dtype)  # [B, 1]
-  shifted = jnp.concatenate([pad, scored], axis=1)  # [B, S]
-
-  # Get per-token true length by segment
-  tl_tokens = jnp.take(true_lengths, decoder_segment_ids, mode="clip")  # [B, S]
-
-  # Valid if not the first token in its segment and before true length
-  valid = (decoder_positions > 0) & (decoder_positions < tl_tokens)  # [B, S]
-
-  return jnp.where(valid, shifted, jnp.nan)
+  pass
 
 
 @jax.jit

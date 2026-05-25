@@ -396,26 +396,4 @@ class BatchedPrefillProcessor:
       return_prompt_logp: bool = False,
   ) -> tuple[list[Any], DecodeState]:
     """Prefill and insert a packed request."""
-
-    cache, prefix_state, first_tokens = self.engine.prefill_concat(
-        params=params,
-        padded_tokens=tokens,
-        decoder_positions=decoder_positions,
-        decoder_segment_ids=decoder_segment_ids,
-        start_pos=start_pos,
-        true_lengths=true_lengths,
-        num_prompts=num_prompts,
-        return_prompt_logp=return_prompt_logp,
-    )
-    decode_state = self.engine.insert_partial(
-        prefix=prefix_state,
-        decode_state=decode_state,
-        cache=cache,
-        slots=slots,
-        start_indices=start_pos,
-        num_prompts=num_prompts,
-        seq_len=padded_length,
-    )
-    if return_prompt_logp:
-      decode_state["prompt_logp"] = prefix_state["prompt_logp"]
-    return first_tokens, decode_state
+    pass

@@ -121,29 +121,7 @@ class AttentionWithNorm(nnx.Module):
       attention_metadata: None | dict[str, Any] = None,
   ):
     """Applies self-attention with pre and post-layer normalization."""
-    inputs = nn.with_logical_constraint(inputs, self.activation_axis_names)
-    inputs = checkpoint_name(inputs, "decoder_layer_input")
-    # Pre attention norm
-    lnx = self.pre_self_attention_layer_norm(inputs)
-    lnx = nn.with_logical_constraint(lnx, self.activation_axis_names)
-    # Self attention
-    attention_lnx, kv_cache = self.self_attention(
-        lnx,
-        lnx,
-        decoder_positions,
-        decoder_segment_ids=decoder_segment_ids,
-        deterministic=deterministic,
-        model_mode=model_mode,
-        kv_cache=kv_cache,
-        attention_metadata=attention_metadata,
-    )
-    attention_lnx = nn.with_logical_constraint(attention_lnx, self.activation_axis_names)
-    # Residual connection after attention
-    intermediate_inputs = inputs + attention_lnx
-    # Post attention norm
-    hidden_states = self.post_self_attention_layer_norm(intermediate_inputs)
-    hidden_states = nn.with_logical_constraint(hidden_states, self.activation_axis_names)
-    return hidden_states, intermediate_inputs, kv_cache
+    pass
 
 
 # -----------------------------------------

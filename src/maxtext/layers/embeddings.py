@@ -196,9 +196,7 @@ class Embed(nnx.Module):
       Commonly used for weight-sharing between embeddings and logit transform
       in NLP models.
     """
-    embedding = self.embedding.get_value()
-    attend_dtype = self.attend_dtype if self.attend_dtype is not None else self.dtype
-    return attend_on_embedding(query, embedding, attend_dtype, self.config, out_sharding)
+    pass
 
 
 def attend_on_embedding(
@@ -256,16 +254,7 @@ def rotary_embedding_as_linen(
     fprop_dtype: The dtype of the output.
     name: Name of the Linen module.
   """
-  return nnx_wrappers.to_linen(
-      RotaryEmbedding,
-      min_timescale=min_timescale,
-      max_timescale=max_timescale,
-      embedding_dims=embedding_dims,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-  )
+  pass
 
 
 class RotaryEmbedding(nnx.Module):
@@ -312,21 +301,15 @@ class RotaryEmbedding(nnx.Module):
   @property
   def timescale(self):
     """Returns the timescale for the rotary embedding."""
-    half_embedding_dim = self.embedding_dims // 2
-    fraction = 2 * jnp.arange(0, half_embedding_dim) / self.embedding_dims
-    timescale = self.min_timescale * (self.max_timescale / self.min_timescale) ** fraction
-    if self.rope_linear_scaling_factor != 1.0:
-      timescale = timescale * self.rope_linear_scaling_factor
-    return timescale
+    pass
 
   def _rotate_half(self, x: jax.Array) -> jax.Array:
     """Rotates half the hidden dims of the input: (x1, x2) -> (-x2, x1)."""
-    x1, x2 = jnp.split(x, 2, axis=-1)
-    return jnp.concatenate((-x2, x1), axis=-1)
+    pass
 
   def apply_rotary(self, inputs: jax.Array, cos: jax.Array, sin: jax.Array) -> jax.Array:
     """Applies the rotary transformation logic."""
-    return (inputs * cos) + (self._rotate_half(inputs) * sin)
+    pass
 
   def __call__(
       self,  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
@@ -393,17 +376,7 @@ def llama_rotary_embedding_as_linen(
     use_scale: Whether to apply LLaMA3.1 scaling factor.
     name: Name of the Linen module.
   """
-  return nnx_wrappers.to_linen(
-      LLaMARotaryEmbedding,
-      min_timescale=min_timescale,
-      max_timescale=max_timescale,
-      embedding_dims=embedding_dims,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      use_scale=use_scale,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-  )
+  pass
 
 
 def partial_rotary_embedding_as_linen(
@@ -431,19 +404,7 @@ def partial_rotary_embedding_as_linen(
     fprop_dtype: The dtype of the output.
     name: Name of the Linen module.
   """
-  return nnx_wrappers.to_linen(
-      PartialRotaryEmbedding,
-      min_timescale=min_timescale,
-      max_timescale=max_timescale,
-      mesh=mesh,
-      embedding_dims=embedding_dims,
-      partial_rotary_factor=partial_rotary_factor,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      shard_mode=shard_mode,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-  )
+  pass
 
 
 class PartialRotaryEmbedding(RotaryEmbedding):
@@ -554,26 +515,7 @@ class Gemma4PartialRotaryEmbedding(RotaryEmbedding):
   @property
   def timescale(self) -> jax.Array:
     """The inf-padded timescale for Gemma 4 rotary embedding."""
-    half_rotary_dim = self.rotary_dim // 2
-
-    # Gemma 4 uniquely uses the full head_dim as the denominator
-    fraction = 2 * jnp.arange(0, half_rotary_dim) / self.head_dim
-    timescale = self.min_timescale * (self.max_timescale / self.min_timescale) ** fraction
-
-    if getattr(self, "rope_linear_scaling_factor", 1.0) != 1.0:
-      timescale = timescale * self.rope_linear_scaling_factor
-
-    # Pad the remaining angles with jnp.inf.
-    # When position is divided by inf, the angle becomes 0.
-    # sin(0)=0 and cos(0)=1, which acts as a passthrough for unrotated dims.
-    nope_angles = (self.head_dim // 2) - half_rotary_dim
-
-    return jnp.pad(
-        timescale,
-        pad_width=(0, nope_angles),
-        mode="constant",
-        constant_values=(0.0, jnp.inf),
-    )
+    pass
 
   # Note: No __call__ override is required. The base RotaryEmbedding.__call__
   # handles the rotation perfectly using the padded self.timescale.
@@ -624,47 +566,10 @@ class LLaMARotaryEmbedding(RotaryEmbedding):
     # https://github.com/meta-llama/llama-models/blob/301ca3a2b3b10e94ddcd1fdd2c57e52f812e1cac/models/llama3/reference_impl/model.py#L45C5-L45C18
     self.use_scale = use_scale
 
-  @property
-  def timescale(self):
-    half_embedding_dim = self.embedding_dims // 2
-    fraction = 2 * jnp.arange(0, half_embedding_dim) / self.embedding_dims
-    fraction = jnp.repeat(fraction, 2)
-    timescale = self.min_timescale * (self.max_timescale / self.min_timescale) ** fraction
-
-    # Apply scaling factor if enabled
-    if self.use_scale:
-      timescale = 1.0 / jax.vmap(self._apply_scaling_factor)(1.0 / timescale)
-
-    # Expand timescale dimensions for broadcasting
-    return timescale[jnp.newaxis, jnp.newaxis, jnp.newaxis, :]
 
   def _apply_scaling_factor(self, freq):
     """apply scaling factor to rotary position embedding."""
-    scale_factor = 8
-    low_freq_factor = 1
-    high_freq_factor = 4
-    old_context_len = 8192  # original llama3 length
-
-    low_freq_wavelen = old_context_len / low_freq_factor
-    high_freq_wavelen = old_context_len / high_freq_factor
-    wavelen = 2 * jnp.pi / freq
-
-    def lower_wavelen(freq):
-      return freq
-
-    def bigger_or_equal_wavelen(freq):
-      def bigger_wavelen(freq):
-        return freq / scale_factor
-
-      def equal_wavelen(freq):
-        smooth = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
-        return (1 - smooth) * freq / scale_factor + smooth * freq
-
-      bigger_wavelen_cond = wavelen > low_freq_wavelen
-      return jax.lax.cond(bigger_wavelen_cond, bigger_wavelen, equal_wavelen, freq)
-
-    lower_wavelen_cond = wavelen < high_freq_wavelen
-    return jax.lax.cond(lower_wavelen_cond, lower_wavelen, bigger_or_equal_wavelen, freq)
+    pass
 
   def __call__(self, inputs: jax.Array, position: None | jax.Array = None) -> jax.Array:
     """Applies LLaMA variant of rotary position embedding.
@@ -754,25 +659,7 @@ def yarn_rotary_embedding_as_linen(
     fprop_dtype: The forward pass dtype.
     name: The name of the module.
   """
-  return nnx_wrappers.to_linen(
-      YarnRotaryEmbedding,
-      embedding_dims=embedding_dims,
-      max_position_embeddings=max_position_embeddings,
-      mesh=mesh,
-      original_max_position_embeddings=original_max_position_embeddings,
-      beta_fast=beta_fast,
-      beta_slow=beta_slow,
-      rope_theta=rope_theta,
-      rope_factor=rope_factor,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-      interleave=interleave,
-      truncate=truncate,
-      attention_scaling=attention_scaling,
-      shard_mode=shard_mode,
-  )
+  pass
 
 
 class YarnRotaryEmbedding(nnx.Module):
@@ -861,34 +748,11 @@ class YarnRotaryEmbedding(nnx.Module):
   @property
   def freqs_cis(self):
     """Frequencies for rotary embedding."""
-    half_dim = self.embedding_dims // 2
-    # Compute base frequencies for each (even-indexed) dimension.
-    # (Note: We use jnp.arange with float32 for precision.)
-    freqs = 1.0 / (self.rope_theta ** (2.0 * jnp.arange(0, half_dim, dtype=jnp.float32) / self.embedding_dims))
-
-    low, high = self._find_correction_range(
-        self.beta_fast,
-        self.beta_slow,
-        self.embedding_dims,
-        self.rope_theta,
-        self.original_max_position_embeddings,
-        self.truncate,
-    )
-    smooth = 1 - self._linear_ramp_factor(low, high, half_dim)
-    # The corrected frequency is a weighted mix of the scaled and base values.
-    freqs = freqs / self.rope_factor * (1 - smooth) + freqs * smooth
-
-    # Precompute frequencies for all positions by taking the outer product.
-    t = jnp.arange(self.max_position_embeddings, dtype=jnp.float32)  # shape [max_position_embeddings]
-    # This gives a [max_position_embeddings, half_dim] tensor with rows as time steps.
-    freqs = jnp.outer(t, freqs)
-
-    # Compute the complex “cis” values: exp(i * theta).
-    return jnp.exp(1j * freqs)  # shape [max_position_embeddings, half_dim]
+    pass
 
   def _find_correction_dim(self, num_rotations: float, dim: int, base: float, max_position_embeddings: int) -> float:
     """Compute the correction dimension for a given number of rotations."""
-    return dim * math.log(max_position_embeddings / (num_rotations * 2 * math.pi)) / (2 * math.log(base))
+    pass
 
   def _find_correction_range(
       self,
@@ -912,24 +776,14 @@ class YarnRotaryEmbedding(nnx.Module):
     Returns:
         tuple[int, int]: The range of correction dimensions (low, high), clamped to valid indices.
     """
-    low = self._find_correction_dim(low_rot, dim, base, max_position_embeddings)
-    high = self._find_correction_dim(high_rot, dim, base, max_position_embeddings)
-    if truncate:
-      low = math.floor(low)
-      high = math.ceil(high)
-    low = max(low, 0)
-    high = min(high, dim - 1)
-    return low, high
+    pass
 
   def _linear_ramp_factor(self, min_val: float, max_val: float, dim: int) -> Array:
     """Computes a linear ramp over the dimension.
 
     Returns a jax.Array of shape (dim,) with values between 0 and 1.
     """
-    if min_val == max_val:
-      max_val += 0.001  # Avoid division by zero.
-    linear_func = (jnp.arange(dim, dtype=jnp.float32) - min_val) / (max_val - min_val)
-    return jnp.clip(linear_func, 0, 1)
+    pass
 
   def __call__(self, inputs: Array, position: None | Array = None) -> Array:
     """Applies the rotary positional embedding using the precomputed complex frequencies.
@@ -1063,27 +917,7 @@ class PositionalEmbedding(nnx.Module):
     Returns:
       Embeddings of shape (seq_len, embedding_dims) or (batch, seq_len, embedding_dims).
     """
-    num_timescales = self.embedding_dims // 2
-    log_timescale_increment = jnp.log(float(self.max_wavelength)) / jnp.maximum(
-        jnp.asarray(num_timescales, dtype=jnp.float32) - 1, 1
-    )
-    inv_timescales = jnp.exp(jnp.arange(num_timescales, dtype=jnp.float32) * -log_timescale_increment)
-
-    if position.ndim == 1:
-      # use the same position for the whole batch when position is (seq_len,)
-      scaled_time = position[:, jnp.newaxis] * inv_timescales[jnp.newaxis, :]
-    else:
-      # when position is (batch, seq_len)
-      position = position[:, :, jnp.newaxis]
-      inv_timescales = inv_timescales[jnp.newaxis, jnp.newaxis, :]
-      scaled_time = position * inv_timescales
-
-    signal = jnp.concatenate([jnp.sin(scaled_time), jnp.cos(scaled_time)], axis=-1)
-
-    if self.cast_as_fprop_dtype:
-      return signal.astype(self.fprop_dtype)
-    else:
-      return signal.astype(jnp.float32)
+    pass
 
   def __call__(
       self,
@@ -1130,18 +964,7 @@ def llama_vision_rotary_embedding_as_linen(
     fprop_dtype: The dtype of the output.
     name: The name of the Linen module.
   """
-  return nnx_wrappers.to_linen(
-      LlamaVisionRotaryEmbedding,
-      image_size=image_size,
-      patch_size=patch_size,
-      hidden_size=hidden_size,
-      num_attention_heads=num_attention_heads,
-      rope_theta=rope_theta,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-  )
+  pass
 
 
 @dataclasses.dataclass(repr=False)
@@ -1176,35 +999,7 @@ class LlamaVisionRotaryEmbedding(nnx.Module):
   @property
   def freqs_cis(self):
     """Frequencies for rotary embedding."""
-    idx = self.image_size // self.patch_size
-    img_idx = jnp.arange(idx**2, dtype=jnp.int32).reshape(idx**2, 1)
-    img_idx = jnp.concatenate([img_idx, img_idx[:1]], axis=0)
-    img_idx = img_idx.at[-1, -1].set(-2)  # ID_CLS_TOKEN
-
-    # Get 2D coordinates
-    frequencies_x = img_idx % idx  # x coordinates
-    frequencies_y = img_idx // idx  # y coordinates
-
-    # Compute frequency dimensions
-    freq_dim = self.hidden_size // self.num_attention_heads // 2
-    rope_freq = 1.0 / (self.rope_theta ** (jnp.arange(0, freq_dim, 2)[: (freq_dim // 2)].astype(jnp.float32) / freq_dim))
-
-    # Compute frequencies for x and y coordinates
-    freqs_x = (frequencies_x + 1)[..., None] * rope_freq[None, None, :]
-    freqs_y = (frequencies_y + 1)[..., None] * rope_freq[None, None, :]
-
-    # Interleave x and y frequencies
-    freqs_x = jnp.repeat(freqs_x, 2, axis=-1)
-    freqs_y = jnp.repeat(freqs_y, 2, axis=-1)
-
-    # Combine frequencies
-    freqs = jnp.concatenate([freqs_x, freqs_y], axis=-1).astype(jnp.float32)
-    freqs = freqs[..., ::2]
-
-    # Mask out invalid positions
-    freqs = jnp.where(img_idx.reshape(-1, 1, 1) < 0, 0, freqs)
-    # Convert to complex representation
-    return jnp.exp(1j * freqs)
+    pass
 
   def __call__(self, inputs: Array, position: None | Array = None) -> Array:
     """Applies rotary embeddings to the input tensor for Llama4 vision encoder.
@@ -1299,12 +1094,7 @@ class Qwen3OmniMoeVisionRotaryEmbedding(nnx.Module):
     Returns:
       Array of shape [max_hw, head_dim//4] containing frequencies for each position
     """
-
-    inv_freq = 1.0 / (self.rope_theta ** (jnp.arange(0, self.head_dim // 2, 2, dtype=jnp.float32) / (self.head_dim // 2)))
-    # Compute for all positions [0, max_hw)
-    positions = jnp.arange(max_hw, dtype=jnp.float32)
-    freqs = jnp.outer(positions, inv_freq)  # [max_hw, head_dim//4]
-    return freqs
+    pass
 
   def _generate_position_ids_single(self, num_frames: int, height: int, width: int) -> Array:
     """Generate 2D position IDs for a single image or video.
@@ -1317,35 +1107,7 @@ class Qwen3OmniMoeVisionRotaryEmbedding(nnx.Module):
     Returns:
       Array of shape [num_frames * height * width, 2] with (row_id, col_id)
     """
-    merge_size = self.spatial_merge_size
-    merged_h = height // merge_size
-    merged_w = width // merge_size
-
-    # Block indices
-    block_rows = jnp.arange(merged_h)  # [merged_h]
-    block_cols = jnp.arange(merged_w)  # [merged_w]
-
-    # Intra-block offsets
-    intra_row = jnp.arange(merge_size)  # [merge_size]
-    intra_col = jnp.arange(merge_size)  # [merge_size]
-
-    # Full resolution positions using broadcasting
-    # Shape: [merged_h, 1, merge_size, 1]
-    row_idx = block_rows[:, None, None, None] * merge_size + intra_row[None, None, :, None]
-    # Shape: [1, merged_w, 1, merge_size]
-    col_idx = block_cols[None, :, None, None] * merge_size + intra_col[None, None, None, :]
-
-    # Expand to full grid and flatten
-    row_idx = jnp.broadcast_to(row_idx, (merged_h, merged_w, merge_size, merge_size)).reshape(-1)
-    col_idx = jnp.broadcast_to(col_idx, (merged_h, merged_w, merge_size, merge_size)).reshape(-1)
-
-    coords = jnp.stack([row_idx, col_idx], axis=-1)  # [h*w, 2]
-
-    # Repeat for video frames
-    if num_frames > 1:
-      coords = jnp.tile(coords, (num_frames, 1))
-
-    return coords
+    pass
 
   def compute_cos_sin(self, num_frames: int, height: int, width: int) -> tuple[Array, Array]:
     """Compute cos and sin embeddings for given static grid dimensions.
@@ -1358,27 +1120,7 @@ class Qwen3OmniMoeVisionRotaryEmbedding(nnx.Module):
     Returns:
       Tuple of (cos_emb, sin_emb) each of shape [num_frames * height * width, head_dim]
     """
-    max_hw = max(height, width)
-    freq_table = self._compute_freq_table(max_hw)  # [max_hw, head_dim//4]
-    coords = self._generate_position_ids_single(num_frames, height, width)  # [T*H*W, 2]
-
-    row_freqs = freq_table[coords[:, 0]]  # [T*H*W, head_dim//4]
-    col_freqs = freq_table[coords[:, 1]]  # [T*H*W, head_dim//4]
-
-    # Concatenate row and column frequencies
-    embeddings = jnp.concatenate([row_freqs, col_freqs], axis=-1)  # [T*H*W, head_dim//2]
-
-    # Double the embeddings to match head_dim
-    embeddings = jnp.concatenate([embeddings, embeddings], axis=-1)  # [T*H*W, head_dim]
-
-    cos_emb = jnp.cos(embeddings)
-    sin_emb = jnp.sin(embeddings)
-
-    if self.cast_as_fprop_dtype:
-      cos_emb = cos_emb.astype(self.fprop_dtype)
-      sin_emb = sin_emb.astype(self.fprop_dtype)
-
-    return cos_emb, sin_emb
+    pass
 
   def _rotate_half(self, x: Array) -> Array:
     """Rotates half the hidden dims of the input.
@@ -1389,9 +1131,7 @@ class Qwen3OmniMoeVisionRotaryEmbedding(nnx.Module):
     Returns:
       Rotated tensor where (x1, x2) -> (-x2, x1)
     """
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    return jnp.concatenate([-x2, x1], axis=-1)
+    pass
 
   def __call__(self, inputs: Array, num_frames: int, height: int, width: int) -> Array:
     """Apply rotary position embeddings directly to inputs (Q or K tensors).
@@ -1449,17 +1189,7 @@ def qwen3omnimoe_vision_pos_embed_interpolate_as_linen(
   Returns:
     A Linen module that wraps the NNX Qwen3OmniMoeVisionPosEmbedInterpolate module.
   """
-  return nnx_wrappers.to_linen(
-      Qwen3OmniMoeVisionPosEmbedInterpolate,
-      num_position_embeddings=num_position_embeddings,
-      hidden_size=hidden_size,
-      spatial_merge_size=spatial_merge_size,
-      dtype=dtype,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-  )
+  pass
 
 
 class Qwen3OmniMoeVisionPosEmbedInterpolate(nnx.Module):
@@ -1534,49 +1264,7 @@ class Qwen3OmniMoeVisionPosEmbedInterpolate(nnx.Module):
         - indices: [4, h*w] indices into pos_embed for 4 corners
         - weights: [4, h*w] bilinear weights for 4 corners
     """
-    N = self.num_grid_per_side
-
-    # Create interpolation coordinates
-    h_idxs = jnp.linspace(0, N - 1, h)
-    w_idxs = jnp.linspace(0, N - 1, w)
-
-    # Floor and ceiling indices
-    h_idxs_floor = jnp.floor(h_idxs).astype(jnp.int32)
-    w_idxs_floor = jnp.floor(w_idxs).astype(jnp.int32)
-    h_idxs_ceil = jnp.minimum(h_idxs_floor + 1, N - 1)
-    w_idxs_ceil = jnp.minimum(w_idxs_floor + 1, N - 1)
-
-    # Fractional parts for interpolation weights
-    dh = h_idxs - h_idxs_floor
-    dw = w_idxs - w_idxs_floor
-
-    # Compute flat indices for 2D grid
-    base_h = h_idxs_floor * N
-    base_h_ceil = h_idxs_ceil * N
-
-    # 4 corner indices: (floor_h, floor_w), (floor_h, ceil_w), (ceil_h, floor_w), (ceil_h, ceil_w)
-    indices = jnp.stack(
-        [
-            (base_h[:, None] + w_idxs_floor[None, :]).reshape(-1),
-            (base_h[:, None] + w_idxs_ceil[None, :]).reshape(-1),
-            (base_h_ceil[:, None] + w_idxs_floor[None, :]).reshape(-1),
-            (base_h_ceil[:, None] + w_idxs_ceil[None, :]).reshape(-1),
-        ],
-        axis=0,
-    )  # [4, h*w]
-
-    # Bilinear weights
-    weights = jnp.stack(
-        [
-            ((1 - dh)[:, None] * (1 - dw)[None, :]).reshape(-1),
-            ((1 - dh)[:, None] * dw[None, :]).reshape(-1),
-            (dh[:, None] * (1 - dw)[None, :]).reshape(-1),
-            (dh[:, None] * dw[None, :]).reshape(-1),
-        ],
-        axis=0,
-    )  # [4, h*w]
-
-    return indices, weights
+    pass
 
   def __call__(self, num_frames: int, height: int, width: int) -> Array:
     """Interpolate positional embeddings for given static grid dimensions.
@@ -1695,21 +1383,7 @@ class Qwen3OmniMoeThinkerTextRotaryEmbedding(RotaryEmbedding):
     Returns:
       freqs_t: Shape (batch, seq_len, head_dim // 2) with interleaved pattern
     """
-    # Start with temporal frequencies (dimension 0)
-    freqs_t = freqs[0]  # (batch, seq_len, head_dim // 2)
-
-    # Create interleaved pattern
-    # For each spatial dimension (H, W), place frequencies at positions:
-    # offset=1 for H, offset=2 for W, with stride=3
-    for dim_idx, offset in enumerate([1, 2], start=1):  # H=1, W=2
-      section_size = self.mrope_section[dim_idx] * 3  # Total positions for this dimension
-      # Select positions with stride 3, starting at offset
-      # Use slice syntax to match PyTorch behavior
-      idx = slice(offset, section_size, 3)
-      # Replace those positions with the corresponding spatial frequencies
-      freqs_t = freqs_t.at[..., idx].set(freqs[dim_idx, ..., idx])
-
-    return freqs_t
+    pass
 
   def __call__(
       self,
@@ -1789,14 +1463,4 @@ def qwen3_omni_mrope_embedding_as_linen(
     mrope_section: Tuple of (temporal_dim, height_dim, width_dim) for MRoPE.
     name: Name of the Linen module.
   """
-  return nnx_wrappers.to_linen(
-      Qwen3OmniMoeThinkerTextRotaryEmbedding,
-      min_timescale=min_timescale,
-      max_timescale=max_timescale,
-      embedding_dims=embedding_dims,
-      cast_as_fprop_dtype=cast_as_fprop_dtype,
-      fprop_dtype=fprop_dtype,
-      mrope_section=mrope_section,
-      metadata_fn=variable_to_logically_partitioned,
-      name=name,
-  )
+  pass

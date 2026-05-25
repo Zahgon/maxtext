@@ -70,26 +70,6 @@ class TunixMaxTextAdapter(nnx.Module):
     )
     return logits, None
 
-  def to_hf_mappings(self):
-    if self.use_no_op_mappings:
-      return {}
 
-    return self._vllm_weight_mapping.to_hf_mapping()
 
-  def to_hf_transpose_keys(self):
-    if self.use_no_op_mappings:
-      return {}
 
-    return self._vllm_weight_mapping.to_hf_transpose_keys()
-
-  def to_hf_hook_fns(self):
-    if self.use_no_op_mappings:
-      return {}
-
-    return self._vllm_weight_mapping.to_hf_hook_fns()
-
-  def lora_to_hf_mappings(self):
-    if self.use_no_op_mappings:
-      return {}
-
-    return self._vllm_weight_mapping.lora_to_hf_mappings()

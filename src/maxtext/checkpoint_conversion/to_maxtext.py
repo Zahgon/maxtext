@@ -229,11 +229,8 @@ class LazyTensor:
   @property
   def nbytes(self):
     """Return estimated nbytes so Orbax doesn't need to load the real array to find out."""
-    return self.size * self.dtype.itemsize
+    pass
 
-  @property
-  def itemsize(self):
-    return self.dtype.itemsize
 
   def __array__(self, dtype=None):
     """
@@ -358,21 +355,7 @@ def _build_multi_axis_stacked_tensor(
   Returns:
       The final, assembled NumPy array for the MaxText parameter.
   """
-  all_expert_tensors = []
-  # The hook function needs the shape of an individual slice, not the full stacked tensor.
-  # For multi-axis stacking (experts, layers, ...), the slice shape is target_shape[2:]
-  mt_slice_shape = target_shape[2:]
-
-  # Outer loop iterates through experts
-  for layer_keys_for_expert in hf_source_keys:
-    layer_tensors_for_expert = []
-    # Inner loop iterates through layers for the current expert
-    for hf_key_single in layer_keys_for_expert:
-      hf_tensor_numpy = tensor_getter_fn(hf_key_single)
-      processed_hf_tensor = apply_hook_fns(hf_tensor_numpy, mt_slice_shape, hook_fns)
-      layer_tensors_for_expert.append(processed_hf_tensor)
-    all_expert_tensors.append(np.stack(layer_tensors_for_expert, axis=0))
-  return np.stack(all_expert_tensors, axis=0)
+  pass
 
 
 def _build_single_axis_stacked_tensor(
@@ -397,28 +380,7 @@ def _build_single_axis_stacked_tensor(
   Returns:
       The final, assembled NumPy array for the MaxText parameter.
   """
-  tensors_to_stack = []
-
-  if config.scan_layers:
-    # If it's a standard scanned layer, we use the configured param_scan_axis.
-    axis_to_stack = config.param_scan_axis
-  else:
-    # Otherwise, if an unscanned MoE layer, and we stack along the expert axis (0).
-    axis_to_stack = 0
-
-  # The hook function needs the shape of an individual slice, not the full stacked tensor.
-  # We calculate it by removing the stacking dimension from the final target shape.
-  mt_slice_shape_list = list(target_shape)
-  del mt_slice_shape_list[axis_to_stack]
-  mt_slice_shape = tuple(mt_slice_shape_list)
-
-  for hf_key_single in hf_source_keys:
-    hf_tensor_numpy = tensor_getter_fn(hf_key_single)
-    processed_hf_tensor = apply_hook_fns(hf_tensor_numpy, mt_slice_shape, hook_fns)
-    tensors_to_stack.append(processed_hf_tensor)
-
-  # Stack all processed tensors along the determined axis.
-  return np.stack(tensors_to_stack, axis=axis_to_stack)
+  pass
 
 
 def _get_hf_loading_function(hf_source_keys_or_key, tensor_getter, hook_fn, mt_target_shape_or_shapes, config):
@@ -432,8 +394,6 @@ def _get_hf_loading_function(hf_source_keys_or_key, tensor_getter, hook_fn, mt_t
   load_fn = None
   if not isinstance(hf_source_keys_or_key, list):
     # Case 1: Single hf key (str)
-    def _loader(getter, key, shape, hook):
-      return apply_hook_fns(getter(key), shape, hook)
 
     load_fn = partial(
         _loader,
@@ -553,8 +513,6 @@ def _get_maxtext_weight(
       # full source tensor but then slicing its piece. Parent HF tensor is loaded repeatedly.
       for i, mt_target_idx in enumerate(mt_target_idx_or_indices):
 
-        def _slicing_loader(base_loader, slice_idx):
-          return np.array(base_loader)[..., slice_idx]
 
         # Each LazyTensor gets a new load_fn that wraps the original and applies the slice.
         slicing_load_fn = partial(_slicing_loader, final_mt_tensor_numpy, i)
@@ -778,32 +736,6 @@ def _setup_merge_mode_getter(tensor_getter, config, hf_lora_adapter_path, revisi
 
   original_getter = tensor_getter
 
-  def _merged_getter(key):
-    base_w = original_getter(key)
-    if key in base_to_lora:
-      lora_dict = base_to_lora[key]
-      if "A" in lora_dict and "B" in lora_dict:
-        lora_a = np.array(lora_dict["A"], dtype=np.float32)
-        lora_b = np.array(lora_dict["B"], dtype=np.float32)
-
-        if lora_a.ndim > 2 or lora_b.ndim > 2:
-          # Use einsum for multi-dimensional LoRA weights to contract on rank dimension
-          delta = np.einsum("...ir,rj...->...ij...", lora_b, lora_a) * scaling
-        else:
-          delta = np.matmul(lora_b, lora_a) * scaling
-
-        if hasattr(base_w, "dtype"):
-          original_dtype = base_w.dtype
-        else:
-          original_dtype = np.float32
-
-        if delta.shape != base_w.shape and delta.size == base_w.size:
-          delta = delta.reshape(base_w.shape)
-
-        base_w = np.array(base_w, dtype=np.float32) + delta
-        return base_w.astype(original_dtype)
-
-    return base_w
 
   return _merged_getter
 
@@ -918,23 +850,6 @@ def main(
       max_logging.log(f"HuggingFace model loaded. dtypes: {unique_dtypes}")
       print_ram_usage("After full HF model load")
 
-      def _eager_getter(key):
-        if key not in hf_state_dict_numpy:
-          raise ValueError(f"HuggingFace key {key} not found in state_dict.")
-        v = hf_state_dict_numpy[key]
-        # target dtype is "float32"
-        if save_dtype == DType.FLOAT32:
-          return v.to(torch.float32).numpy()
-        # target dtype is "bfloat16"
-        elif save_dtype == DType.BFLOAT16:
-          # - torch.bfloat16 -> torch.float32 -> np.float32 -> ml_dtypes.bfloat16
-          #   As numpy doesn't accept bfloat16 directly, we convert to float32 first
-          # - torch.float16 -> np.float16 -> ml_dtypes.bfloat16
-          # - torch.float32 -> np.float32 -> ml_dtypes.bfloat16
-          if v.dtype == torch.bfloat16:
-            v = v.to(torch.float32)
-          return v.numpy().astype(ml_dtypes.bfloat16)
-        raise NotImplementedError(f"Save dtype {save_dtype} is not currently implemented.")
 
       tensor_getter = _eager_getter
 

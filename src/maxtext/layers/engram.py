@@ -272,52 +272,7 @@ class NgramHashMapping:
     Returns:
       hash_ids: [B, S, H_total] where H_total = H * num_ngram_orders
     """
-    x = jnp.asarray(compressed_ids, dtype=jnp.int32)
-    B, _ = x.shape
-
-    # 1. Create Sliding Windows via Shifting
-    shifted_inputs = []
-    for k in range(self.max_ngram_size):
-      if k == 0:
-        shifted_inputs.append(x)
-      else:
-        # Pre-allocate full array with PAD_ID
-        padding = jnp.full((B, k), self.pad_id, dtype=jnp.int32)
-        # Fast memory copy, slicing and assignment
-        # e.g., k=1, [PAD, The, cat]
-        #       k=2, [PAD, PAD, The]
-        shifted_x = jnp.concatenate([padding, x[:, :-k]], axis=1)
-        shifted_inputs.append(shifted_x)
-
-    # 2. Retrieve layer-specific hash multipliers
-    multipliers = self.layer_multipliers[layer_id]
-
-    # 3. Compute Hashes: multiplicative bitwise XOR
-    # Implements hash: H_n = (shift_0 * m_0) ^ ... ^ (shift_k * m_k)
-    # e.g., (The * m_0) ^ (PAD * m_1) ^ (PAD * m_2)
-    #       (cat * m_0) ^ (The * m_1) ^ (PAD * m_2)
-    #       (sat * m_0) ^ (cat * m_1) ^ (The * m_2)
-    all_hashes = []
-    # Initialize with unigrams, shape: [B, S]
-    ngram_hash = shifted_inputs[0] * multipliers[0]
-    # Pre-fetch vocab sizes for modulo
-    vocab_sizes = self.vocab_size_across_layers[layer_id]
-
-    for n in range(2, self.max_ngram_size + 1):
-      # Update hash with next history token
-      ngram_hash = jnp.bitwise_xor(ngram_hash, shifted_inputs[n - 1] * multipliers[n - 1])
-
-      # Retrieve prime vocab sizes for all heads of this n-gram order
-      vocab_sizes_for_this_gram = vocab_sizes[n - 2]
-      mods = jnp.array(vocab_sizes_for_this_gram, dtype=jnp.int32)
-
-      # Broadcast Modulo: Map hash to valid table indices
-      # [B, S, 1] % [H] -> [B, S, H]
-      head_hashes = ngram_hash[..., None] % mods
-      all_hashes.append(head_hashes)
-
-    # Concatenate all heads: [B, S, H_total] where H_total = H * num_ngram_orders
-    return jnp.concatenate(all_hashes, axis=2)
+    pass
 
   def __call__(self, input_ids) -> dict[int, Array]:
     # input_ids from standard tokenizer
@@ -477,9 +432,6 @@ class ShortConv(nnx.Module):
     #   norms: [G, D], vectorize over G, `in_axes=0`
     #   x: [B, S, G, D], vectorize over G, `in_axes=2`
     #   Stack results at axis 2 to get [B, S, G, D], `out_axes=2`
-    @nnx.vmap(in_axes=(0, 2), out_axes=2)
-    def apply_norms(norms, x):
-      return norms(x)
 
     # [B, S, G, D] shape stays
     x = apply_norms(self.norm, x)
@@ -656,9 +608,6 @@ class Engram(nnx.Module):
     #   norms: [G, D], vectorize over G, `in_axes=0`
     #   x: [B, S, G, D], vectorize over G, `in_axes=2`
     #   Stack results at axis 2 to get [B, S, G, D], `out_axes=2`
-    @nnx.vmap(in_axes=(0, 2), out_axes=2)
-    def apply_norms(norms, x):
-      return norms(x)
 
     # [B, S, G, D] shape stays
     key = apply_norms(self.k_norm, key)

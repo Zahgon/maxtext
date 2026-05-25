@@ -64,19 +64,7 @@ class Quantization:
 
 def _tiling_fn(lhs, rhs, dimension_numbers, tile_size):
   """apply tiling function"""
-  del lhs, rhs
-
-  (lhs_ca, rhs_ca), _ = dimension_numbers
-  ret = tiled_dot_general.Cfg(
-      lhs=tiled_dot_general.TensorTiling(contraction_axes=[], remaining_axes=[]),
-      rhs=tiled_dot_general.TensorTiling(contraction_axes=[], remaining_axes=[]),
-  )
-
-  for lhs_idx, rhs_idx in zip(lhs_ca, rhs_ca):
-    ret.lhs.contraction_axes.append(tiled_dot_general.AxisTiling(axis=lhs_idx, tile_size=tile_size, tile_count=None))
-    ret.rhs.contraction_axes.append(tiled_dot_general.AxisTiling(axis=rhs_idx, tile_size=tile_size, tile_count=None))
-
-  return ret
+  pass
 
 
 def _rhs_axis_metadata_wrapper(
@@ -88,31 +76,7 @@ def _rhs_axis_metadata_wrapper(
     replicate_scale: bool = False,
 ):
   """right-hand-side axis metadata wrapper"""
-  if replicate_scale:
-    # Temporarily using the shape to identify the scale.
-    # TODO: remove the replication once the 2d sharding quantization
-    # works as expected.
-    if len(x.shape) == 1:
-      return nn.with_logical_partitioning((lambda: x), tuple(None for _ in mesh_axes))()
-
-  mesh_axes = list(mesh_axes)
-  if is_tiled:
-    # tile_map is a mapping between original rank and a list of new, tiled rank.
-    if len(mesh_axes) < len(tile_map):
-      mesh_axes = [None] * (len(tile_map) - len(mesh_axes)) + mesh_axes
-    new_mesh_axes = [None] * len(x.shape)
-    for orig_rank, new_rank in tile_map.items():
-      assert new_rank
-      assert len(new_rank) <= 2
-      new_mesh_axes[new_rank[-1]] = mesh_axes[orig_rank]
-    mesh_axes = new_mesh_axes
-
-  if mesh_axes is not None and len(mesh_axes) > 0:
-    for no_shard_idx in no_sharding_axis:
-      if no_shard_idx < len(mesh_axes):
-        mesh_axes[no_shard_idx] = None
-
-  return nn.with_logical_partitioning((lambda: x), mesh_axes)()
+  pass
 
 
 @dataclass
@@ -265,8 +229,6 @@ class QwixEinsum(nn.Module):
       out_sharding=None,
   ) -> jax.Array:
 
-    def custom_dot_general(*args, **kwargs):
-      return dot_general_qt.dot_general_qt(*args[:3], self.config)
 
     with jax.disable_jit():
       return jnp.einsum(
@@ -608,8 +570,6 @@ def _get_quant_config(config):
   raise ValueError(f"Invalid value configured for quantization {config.quantization}.")
 
 
-def in_convert_mode(quant):
-  return quant and (quant.quant_mode == aqt_flax.QuantMode.CONVERT)
 
 
 def in_serve_mode(quant):
@@ -923,13 +883,7 @@ class TransformerEngineQuantization(Quantization):
 
     If there is no block requirement for the current recipe, returns 1.
     """
-    from transformer_engine.common import recipe  # pylint: disable=import-outside-toplevel # pytype: disable=import-error
-
-    if isinstance(self._recipe, recipe.MXFP8BlockScaling):
-      return 32
-    if isinstance(self._recipe, recipe.NVFP4BlockScaling):  # pytype: disable=module-attr
-      return 128  # TODO(set this to 16 when unfused RHT is supported)
-    return 1
+    pass
 
   def _wrap(self, f, name=None):
     """Wraps the given function `f` to support TransformerEngine quantization.
@@ -986,17 +940,6 @@ class TransformerEngineQuantization(Quantization):
     """Placeholder for dot_general implementation in subclasses."""
     import transformer_engine.jax  # pylint: disable=import-outside-toplevel # pytype: disable=import-error
 
-    def te_dot_general(generate_quantizer_set, x, kernel, dims, **kwargs):
-      contracting_dims, batch_dims = dims
-      assert batch_dims == ((), ()), "Batch dimensions must be empty for TransformerEngine dot."
-
-      quantizer_set = generate_quantizer_set()
-      return transformer_engine.jax.dense.dense(
-          x,
-          kernel,
-          contracting_dims=contracting_dims,
-          quantizer_set=quantizer_set,
-      )
 
     return self._wrap(te_dot_general, "dot_general")
 

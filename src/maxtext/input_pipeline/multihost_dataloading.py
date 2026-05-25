@@ -40,31 +40,11 @@ import jax.numpy as jnp
 from maxtext.utils import max_logging
 
 
-def _build_global_shape_and_sharding(
-    local_shape: tuple[int, ...], global_mesh: Mesh
-) -> tuple[tuple[int, ...], NamedSharding]:
-  sharding = NamedSharding(global_mesh, PartitionSpec(global_mesh.axis_names))
-
-  global_shape = (jax.process_count() * local_shape[0],) + local_shape[1:]
-
-  return global_shape, sharding
 
 
 def _form_global_array(path, array: np.ndarray, global_mesh: Mesh) -> jax.Array:
   """Put local sharded array into local devices"""
-  global_shape, sharding = _build_global_shape_and_sharding(np.shape(array), global_mesh)
-
-  try:
-    local_device_arrays = np.split(array, len(global_mesh.local_devices), axis=0)
-  except ValueError as array_split_error:
-    raise ValueError(
-        f"Unable to put to devices shape {array.shape} with "
-        f"local device count {len(global_mesh.local_devices)} "
-        f"at {jtu.keystr(path)}"
-    ) from array_split_error
-
-  local_device_buffers = jax.device_put(local_device_arrays, global_mesh.local_devices)
-  return jax.make_array_from_single_device_arrays(global_shape, sharding, local_device_buffers)
+  pass
 
 
 class MultiHostDataLoadIterator:
@@ -111,53 +91,8 @@ class MultiHostDataLoadIterator:
 
   def _get_next_batch_sharded(self) -> jax.Array:
     """Splits the host loaded data equally over all devices."""
-    if self.out_of_data and self.generate_padding_batch:
-      local_data = self._make_padding_batch()
+    pass
 
-    else:
-      SLEEP_TIME = 10
-      MAX_DATA_LOAD_ATTEMPTS = 30
-
-      local_data = None
-      for _ in range(MAX_DATA_LOAD_ATTEMPTS):
-        try:
-          local_data = next(self.local_iterator)
-          if self.expansion_loading_factor_for_grain > 1:
-            # Since grain checkpoint requires fixed batch_size, we run the dataIterator for
-            # expansion_loading_factor_for_grain times to get the
-            # right batch_size for the host that is loading real data.
-            local_data_list = [local_data]
-            for _ in range(1, int(self.expansion_loading_factor_for_grain)):
-              next_batch = next(self.local_iterator)
-              local_data_list.append(next_batch)
-            local_data = jtu.tree_map(lambda *xs: np.concatenate(xs, axis=0), *local_data_list)
-          break  # exit the loop on success
-        except tf.errors.FailedPreconditionError as e:
-          max_logging.log(f"Failed to get next data batch due to {e}, retrying")
-          time.sleep(SLEEP_TIME)
-        except StopIteration as e:
-          if self.generate_padding_batch:
-            max_logging.log(
-                f"MultiHostDataLoadIterator: host {jax.process_index()} failed to load data with {type(e)} error: ({e}). "
-                "It may have reached the end of the data. Generating a padding batch as generate_padding_batch=True."
-            )
-            self.out_of_data = True
-            local_data = self._make_padding_batch()
-            break
-          else:
-            raise e
-      else:
-        raise TimeoutError(f"Failed to load data after {MAX_DATA_LOAD_ATTEMPTS} retry attempts.")
-
-      self.last_local_data = local_data
-    input_gdas = jtu.tree_map_with_path(partial(_form_global_array, global_mesh=self.global_mesh), local_data)
-
-    return input_gdas
-
-  def _make_padding_batch(self):
-    if self.last_local_data is None:
-      raise ValueError("last_local_data is None, cannot make padding batch.")
-    return jtu.tree_map(lambda x: jnp.full_like(x, 0), self.last_local_data)
 
 
 def _colocated_cpu_devices(
@@ -197,29 +132,7 @@ class RemoteIterator:
 
   def get_next(self, dummy_array):
     """Gets the next batch of data and forms a global array."""
-    local_data = next(self.iterator)
-
-    def form_global_array_colocated_python(path, array, devices, global_shape, sharding):
-      try:
-        device_arrays = np.split(array, len(devices), axis=0)
-      except ValueError as array_split_error:
-        raise ValueError(
-            f"Unable to put to devices shape {array.shape} with "
-            f"local device count {len(devices)} "
-            f"at {jtu.keystr(path)}"
-        ) from array_split_error
-      device_arrays = jax.device_put(device_arrays, devices)
-      return jax.make_array_from_single_device_arrays(shape=global_shape, sharding=sharding, arrays=device_arrays)
-
-    return jtu.tree_map_with_path(
-        partial(
-            form_global_array_colocated_python,
-            devices=list(dummy_array.sharding.addressable_devices),
-            global_shape=self.global_shape,
-            sharding=dummy_array.sharding,
-        ),
-        local_data,
-    )
+    pass
 
   def save_state(self, step_array):
     """Saves the iterator state to a file."""

@@ -41,12 +41,7 @@ def factorized_posemb(posemb: jax.Array, positions_xy: jax.Array, precision) -> 
   Returns:
     The computed position embeddings.
   """
-  one_hot = jax.nn.one_hot(positions_xy, posemb.shape[0], dtype=posemb.dtype)
-  nan = jnp.logical_not(one_hot.any(axis=-1, keepdims=True))
-  nan = jnp.logical_and(nan, positions_xy[..., None] != -1)
-  pos_oh = jnp.where(nan, jnp.nan, one_hot)
-  pe_seq = jnp.einsum("...is,sid->i...d", pos_oh, posemb, precision=precision).astype(posemb.dtype)
-  return jnp.sum(pe_seq, axis=0)
+  pass
 
 
 def patchify(images: jax.Array, patch_size: int) -> tuple[jax.Array, jax.Array]:
@@ -291,16 +286,7 @@ def avg_pool_by_positions(
       - output: The pooled features of shape [B, length, D].
       - mask: A boolean mask indicating valid pooled positions.
   """
-  k = max(1, int((x.shape[1] // length) ** 0.5))
-  assert k * k * length == x.shape[1], f"Cannot pool {x.shape=} to {length=}"
-
-  max_x = positions_xy[..., 0].max(axis=-1, keepdims=True) + 1
-  kernel_idxs = jnp.floor_divide(positions_xy, k)
-  flat_kernel_idx = kernel_idxs[..., 0] + (max_x // k) * kernel_idxs[..., 1]
-  weights = jax.nn.one_hot(flat_kernel_idx, length) / k**2
-  output = jnp.einsum("bLl,bLd->bld", weights, x, precision=precision)
-  mask = jnp.logical_not((weights == 0).all(axis=1))
-  return output, mask
+  pass
 
 
 class VisionExit(nnx.Module):
@@ -319,41 +305,7 @@ class VisionExit(nnx.Module):
       length: int,
   ) -> tuple[jax.Array, jax.Array | None]:
     """Downsamples the vision features if required by the output length."""
-    cur_length = x.shape[1]
-
-    POSITIONS_PAD_VALUE = -1
-
-    if cur_length == length:
-      if positions_xy is None:
-        mask = jnp.ones(x.shape[:-1], dtype=jnp.bool_)
-      else:
-        mask = jnp.logical_not((positions_xy == POSITIONS_PAD_VALUE).all(axis=-1))
-      return x, mask
-
-    if positions_xy is not None:
-      x_pooled, mask = avg_pool_by_positions(x, positions_xy=positions_xy, length=length, precision=self.precision)
-      return x_pooled, mask
-
-    cur_width = int(cur_length**0.5)
-    if cur_width**2 != cur_length:
-      raise ValueError(f"x.shape[1]={cur_length} must be a perfect square.")
-
-    output_width = int(length**0.5)
-    if output_width**2 != length:
-      raise ValueError(f"{length=} must be a perfect square.")
-
-    if cur_width % output_width != 0:
-      raise ValueError(f"{cur_width=} must be divisible by {output_width=}.")
-
-    x_2d = x.reshape(x.shape[0], cur_width, cur_width, x.shape[-1])
-
-    window = cur_width // output_width
-    window_shape = (window, window)
-    x_2d = nnx.avg_pool(x_2d, window_shape=window_shape, strides=window_shape)
-
-    x_pooled = x_2d.reshape(x.shape[0], length, x.shape[-1])
-    mask = jnp.ones(x_pooled.shape[:-1], dtype=jnp.bool_)
-    return x_pooled, mask
+    pass
 
   def _single_call(
       self,
@@ -363,11 +315,7 @@ class VisionExit(nnx.Module):
       length: int,
   ) -> tuple[jax.Array, jax.Array | None]:
     """Processes the features for a single target length."""
-    x, mask = self._maybe_downsample(x, positions_xy=positions_xy, length=length)
-
-    x = x * jnp.sqrt(self.d_model)
-
-    return x, mask
+    pass
 
   def __call__(
       self,
@@ -640,11 +588,4 @@ class Gemma4VisionProjector(nnx.Module):
 
 def gemma4_vision_encoder_as_linen(config: Config, mesh: Mesh) -> nn.Module:
   """Wraps the Gemma 4 Vision Encoder as a Linen module."""
-  return nnx_wrappers.to_linen(
-      Gemma4VisionEncoderLayer,
-      config=config,
-      mesh=mesh,
-      name="Gemma4VisionEncoderLayer",
-      abstract_init=False,
-      metadata_fn=initializers.variable_to_logically_partitioned,
-  )
+  pass

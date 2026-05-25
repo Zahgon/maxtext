@@ -137,22 +137,7 @@ def math_verify_func(
   killed via `pool.terminate()` and so the workers cannot contend for the
   trainer's TPU.
   """
-  if not items:
-    return scores
-
-  num_procs = None
-  if trainer_config is not None:
-    timeout = getattr(trainer_config, "math_verify_timeout", timeout)
-    num_procs = getattr(trainer_config, "math_verify_num_procs", None)
-
-  return math_verify_pool(
-      trainer_config,
-      items,
-      scores,
-      timeout=timeout,
-      num_procs=num_procs,
-      log_fn=max_logging.log,
-  )
+  pass
 
 
 def boxed(x: str) -> str:
@@ -194,50 +179,14 @@ def match_format_exactly(prompts: list[str], completions: list[str], tmvp_config
   """
   Give the model a reward of tmvp_config.reward_exact_format_match points if the format matches exactly.
   """
-  scores = []
-  match_format = get_match_format_regex(tmvp_config)
-  for completion in completions:
-    score = 0
-    response = completion
-    # Match if format is seen exactly!
-    if match_format.search(response) is not None:
-      score += tmvp_config.reward_exact_format_match
-    scores.append(score)
-  return scores
+  pass
 
 
 def match_format_approximately(prompts: list[str], completions: list[str], tmvp_config: Any, **kargs: Any) -> list[float]:
   """
   We also reward the model if the format of the output matches partially.
   """
-  scores = []
-
-  for completion in completions:
-    score = 0
-    # Count how many keywords are seen - we penalize if too many!
-    # If we see 1, then plus some points!
-    score += (
-        tmvp_config.reward_partial_format_match
-        if completion.count(tmvp_config.reasoning_start_token) == 1
-        else tmvp_config.penalty_incorrect_format
-    )
-    score += (
-        tmvp_config.reward_partial_format_match
-        if completion.count(tmvp_config.reasoning_end_token) == 1
-        else tmvp_config.penalty_incorrect_format
-    )
-    score += (
-        tmvp_config.reward_partial_format_match
-        if completion.count(tmvp_config.solution_start_token) == 1
-        else tmvp_config.penalty_incorrect_format
-    )
-    score += (
-        tmvp_config.reward_partial_format_match
-        if completion.count(tmvp_config.solution_end_token) == 1
-        else tmvp_config.penalty_incorrect_format
-    )
-    scores.append(score)
-  return scores
+  pass
 
 
 def normalize_final_answer(final_answer: str) -> str:
@@ -425,60 +374,7 @@ def check_numbers(
   Reward the model if the answer is correct using math_verify for robust comparison.
   Handles both numeric values and mathematical expressions with LaTeX.
   """
-  question = kargs["question"]
-
-  # Extract full answer content from solution tags (not just first number)
-  extracted_responses = [extract_answer(c, tmvp_config) for c in completions]
-  true_answers = [list(dict.fromkeys(json.loads(acceptable_answers))) for acceptable_answers in answer]
-
-  scores = [tmvp_config.penalty_incorrect_format] * len(completions)  # Default to penalty for incorrect format
-  math_verify_queue = []
-  for gen_idx, (guess, unique_answers) in enumerate(zip(extracted_responses, true_answers)):
-    if guess is None:
-      continue
-
-    if guess == FALLBACK_ANSWER:
-      scores[gen_idx] = tmvp_config.penalty_incorrect_answer
-      continue
-
-    has_exact_match = False
-    for true_answer in unique_answers:
-      # 1. Check for exact or whitespace-normalized match first for a quick reward
-      if guess == true_answer:
-        scores[gen_idx] = max(scores[gen_idx], tmvp_config.reward_exact_answer)
-        has_exact_match = True
-      elif guess.strip() == true_answer.strip():
-        scores[gen_idx] = max(scores[gen_idx], tmvp_config.reward_white_space_format_match)
-        has_exact_match = True
-
-    if not has_exact_match:
-      norm_guess = preprocess_math_string(guess)
-      norm_answers = []
-      for true_answer in unique_answers:
-        norm_answer = preprocess_math_string(true_answer)
-        norm_answers.append(boxed(norm_answer))
-      math_verify_queue.append((gen_idx, norm_answers, [boxed(norm_guess)]))
-
-  if math_verify_queue:
-    # 2. Try math_verify for robust mathematical correctness checking
-    scores = math_verify_func(math_verify_queue, scores, trainer_config=tmvp_config)
-
-  if tmvp_config.debug.rl:
-    debug_log_path = epath.Path(tmvp_config.base_output_directory) / tmvp_config.run_name / "debug_rl_logs"
-    debug_log_path.mkdir(parents=True, exist_ok=True)
-    log_file = debug_log_path / f"check_numbers_{uuid.uuid4().hex}.txt"
-    log_content = (
-        "START ============================\n"
-        f"Question: {question[0]}\n"
-        f"Answer: {answer[0]}\n"
-        f"Response: {completions[0]}\n"
-        f"Extracted: {extracted_responses[0]}\n"
-        f"Reward Score: {scores[0]}\n"
-        "END ==============================\n"
-    )
-    log_file.write_text(log_content)
-
-  return scores
+  pass
 
 
 def extract_answer(response: str, tmvp_config: Any) -> str:
@@ -547,19 +443,6 @@ def get_optimizer(tmvp_config: Any, max_train_steps: int) -> optax.GradientTrans
   # Add gradient clipping if specified
   # Grad clipping to prevent large gradients. We find this
   # important to keep KL divergence in check.
-  def make_optimizer(learning_rate):
-    transforms = []
-    if tmvp_config.gradient_clipping_threshold > 0:
-      transforms.append(optax.clip_by_global_norm(max_norm=tmvp_config.gradient_clipping_threshold))
-    transforms.append(
-        optax.adamw(
-            learning_rate=learning_rate,
-            b1=tmvp_config.adam_b1,
-            b2=tmvp_config.adam_b2,
-            weight_decay=tmvp_config.adam_weight_decay,
-        )
-    )
-    return optax.chain(*transforms)
 
   # Wrap the entire optimizer (including gradient clipping) with
   # inject_hyperparams so opt_state.hyperparams['learning_rate'] is at the
@@ -709,29 +592,7 @@ def get_correctness_metrics(
     **kwargs: Any,
 ) -> dict[str, tuple[float | int, Callable[..., Any]]]:
   """Compute correctness statistics metrics based on rewards."""
-  del prompts, completions, advantages, kwargs
-  solve_all = (rewards > 0.1).all()
-  solve_none = (rewards == 0).all()
-  solve_partial = (~solve_all) and (~solve_none)
-  solve_ratio = (rewards > 0.1).mean()
-  return {
-      "rewards/solve_all": (
-          1 if solve_all else 0,
-          np.mean,
-      ),
-      "rewards/solve_none": (
-          1 if solve_none else 0,
-          np.mean,
-      ),
-      "rewards/solve_partial": (
-          1 if solve_partial else 0,
-          np.mean,
-      ),
-      "rewards/solve_ratio": (
-          solve_ratio,
-          np.mean,
-      ),
-  }
+  pass
 
 
 class MaxTextChatParser(agentic_chat_template_parser.DefaultChatTemplateParser):

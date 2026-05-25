@@ -231,14 +231,6 @@ def init_maxtext_weights(model_params, num_layers_to_convert, num_experts_to_con
   return weights
 
 
-def _get_hf_tensor(maxtext_key_suffix, hf_map, l, chkpt_vars):
-  for hf_key, mt_key in hf_map.items():
-    if mt_key.endswith(maxtext_key_suffix):
-      if hf_key in chkpt_vars:
-        return chkpt_vars[hf_key]
-      else:
-        raise ValueError(f"HF Key {hf_key} not found in chkpt_vars for MaxText suffix: {maxtext_key_suffix} in layer {l}")
-  raise ValueError(f"Could not find HF key for MaxText suffix: {maxtext_key_suffix} in layer {l}")
 
 
 def convert_hf_to_maxtext(base_model_path: str, model_params: dict, args) -> dict:

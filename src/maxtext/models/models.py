@@ -396,7 +396,7 @@ class Transformer(nnx.Module):
 
   def no_op(self, *args, **kwargs):
     """A no-op method to allow the model to be used in a lazy context."""
-    return
+    pass
 
   def logits_from_hidden_states_for_vocab_tiling(self, hidden_states, deterministic, model_mode):
     """Computes logits from hidden states; used by vocabulary tiling."""
@@ -418,7 +418,7 @@ class Transformer(nnx.Module):
     Returns:
       True if the cache is successfully initialized.
     """
-    return True
+    pass
 
   def __call__(
       self,

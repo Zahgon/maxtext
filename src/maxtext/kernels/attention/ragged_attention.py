@@ -172,42 +172,7 @@ def ragged_flash_attention_kernel(
     mask_value: float,
 ):
   """Pallas kernel for flash attention."""
-  b, i = pl.program_id(0), pl.program_id(1)
-
-  @pl.when(i == 0)
-  def init():
-    m_ref[...] = jnp.full_like(m_ref, -jnp.inf)
-    l_ref[...] = jnp.zeros_like(l_ref)
-    o_ref[...] = jnp.zeros_like(o_ref)
-
-  length = lengths_ref[b]
-
-  @pl.when(i * block_size < length)
-  def run():
-    q = q_ref[...].astype(jnp.float32)
-    k = k_ref[...].astype(jnp.float32)
-    v = v_ref[...].astype(jnp.float32)
-    m_prev, l_prev = m_ref[...], l_ref[...]
-
-    qk = lax.dot_general(q, k, (((1,), (1,)), ((), ())), preferred_element_type=jnp.float32)
-
-    mask = i * block_size + jax.lax.broadcasted_iota(jnp.int32, qk.shape, 1) < length
-    qk = qk + jnp.where(mask, 0.0, mask_value)
-    m_curr = qk.max(axis=-1)
-
-    s_curr = jnp.exp(qk - m_curr[..., None])
-    l_curr = jax.lax.broadcast_in_dim(s_curr.sum(axis=-1), l_prev.shape, (0,))
-    o_curr_times_l_curr = jnp.dot(s_curr, v)
-
-    m_curr = jax.lax.broadcast_in_dim(m_curr, m_prev.shape, (0,))
-    m_next = jnp.maximum(m_prev, m_curr)
-    alpha = jnp.exp(m_prev - m_next)
-    beta = jnp.exp(m_curr - m_next)
-    l_next = alpha * l_prev + beta * l_curr
-    l_next_safe = jnp.where(l_next == 0.0, 1.0, l_next)
-
-    m_ref[...], l_ref[...] = m_next, l_next_safe
-    o_ref[...] = ((l_prev * alpha * o_ref[...] + beta * o_curr_times_l_curr) / l_next_safe).astype(o_ref.dtype)
+  pass
 
 
 def ragged_mqa(
@@ -242,14 +207,6 @@ def ragged_mqa(
   assert lengths.dtype == jnp.int32
   seq_len = k.shape[1]
 
-  def compute_ragged_block_indices(b, i, lengths_ref):
-    length = lengths_ref[b]
-    not_done = i * block_size < length
-    am_last_batch = b == batch_size - 1
-    last_good_block = jnp.maximum(0, lax.div(length, block_size) - 1)
-    b_next = jnp.where(not_done, b, jnp.where(am_last_batch, b, b + 1))
-    i_next = jnp.where(not_done, i, jnp.where(am_last_batch, last_good_block, 0))
-    return b_next, i_next, 0
 
   out, m, l = pl.pallas_call(
       functools.partial(

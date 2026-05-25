@@ -62,9 +62,7 @@ class PreprocessorOutput:
 
 def convert_to_RGB(image):
   """Convert image to RGB format."""
-  if image.mode != "RGB":
-    image = image.convert("RGB")
-  return image
+  pass
 
 
 def load_image_from_path(image_path):
@@ -128,48 +126,7 @@ def merge_mm_embeddings(
   Returns:
     A (B, S, D) array of merged embeddings.
   """
-  # Input Validation and Shape Unpacking
-  batch_size, _, d_model = text_embeddings.shape
-  # The number of tokens per image/tile/audio_chunk is the second to last dimension.
-  num_toks_per_token = multimodal_embeddings.shape[-2]
-
-  if d_model != multimodal_embeddings.shape[-1]:
-    raise ValueError(
-        "Embedding dimension mismatch between text and multimodal embeddings:"
-        f" {d_model} vs {multimodal_embeddings.shape[-1]}"
-    )
-
-  # Reshape Multimodal Embeddings to a unified (B, S_mm, D) format
-  # This single reshape robustly handles both documented cases:
-  # Case 1: (B * N, T, K, D) -> (B, N*T*K, D)
-  # Case 2: (B, N, K, D) -> (B, N*K, D)
-  flat_multimodal_embeddings = multimodal_embeddings.reshape(batch_size, -1, d_model)
-
-  # Process Optional Token Masks
-  flat_token_masks_processed = None
-  if token_masks is not None:
-    # Handle the tiled case where token_masks batch dimension is (B * N)
-    if token_masks.shape[0] != batch_size:
-      if token_masks.shape[0] % batch_size != 0:
-        raise ValueError(
-            "Batch dimension of token_masks must be a multiple of the text"
-            f" batch size. Got {token_masks.shape[0]} and {batch_size}."
-        )
-      # Reshape from (B * N, T) to (B, N * T)
-      flat_tile_masks = token_masks.reshape(batch_size, -1)
-    else:
-      # This handles cases where token_masks is already (B, ...)
-      flat_tile_masks = token_masks.reshape(batch_size, -1)
-
-    # Expand the tile-level mask to a token-level mask to match the embeddings.
-    # A mask of shape (B, N*T) becomes (B, N*T*K) by repeating each element K times.
-    flat_token_masks_processed = jnp.repeat(flat_tile_masks, repeats=num_toks_per_token, axis=1)
-
-  # Vmap the inner merge function over the batch dimension
-  return jax.vmap(
-      _merge_mm_embeddings_inner,  # Assumes this function is defined elsewhere
-      in_axes=(0, 0, 0, None if flat_token_masks_processed is None else 0),
-  )(text_embeddings, flat_multimodal_embeddings, mask, flat_token_masks_processed)
+  pass
 
 
 def _merge_mm_embeddings_inner(
@@ -179,28 +136,7 @@ def _merge_mm_embeddings_inner(
     token_mask: jnp.ndarray | None = None,
 ) -> jnp.ndarray:
   """`merge_mm_embeddings` without batch dimension."""
-
-  if token_mask is not None:
-    # This logic packs valid multimodal tokens to the front of the array.
-    # It correctly handles cases where some multimodal tokens are just padding.
-    sort_indices = jnp.argsort(-token_mask)  # Sorts descending, putting 1s first
-    multimodal_embeddings = multimodal_embeddings[sort_indices]
-
-  # Find positions in the text sequence to place the multimodal embeddings.
-  # The `size` argument ensures a fixed shape for JIT compilation.
-  target_pos = jnp.nonzero(mask, size=multimodal_embeddings.shape[0])
-  target_pos = target_pos[0]  # jnp.nonzero returns a tuple of arrays
-
-  # Save the embedding at the first position.
-  first_pos_embedding = text_embeddings[0]
-
-  # Perform the insertion.
-  merged = text_embeddings.at[target_pos, :].set(multimodal_embeddings)
-
-  # Restore the first position's embedding, in case it was overwritten.
-  merged = merged.at[0].set(first_pos_embedding)
-
-  return merged
+  pass
 
 
 # Following audio functions derived from the HuggingFace implementation

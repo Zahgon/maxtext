@@ -259,7 +259,7 @@ class MaxTextForCausalLM(nnx.Module):
     Returns:
       The result of the `__call__` method.
     """
-    return self(*args, **kwargs)
+    pass
 
   def get_input_embeddings(self) -> jax.Array:
     """Returns the input embeddings of the model.
@@ -267,11 +267,7 @@ class MaxTextForCausalLM(nnx.Module):
     Returns:
       A JAX array representing the input embeddings.
     """
-    if not isinstance(self.model, nnx.Module):
-      raise ValueError("Model is not initialized.")
-
-    with self.mesh, nn.logical_axis_rules(self.maxtext_config.logical_axis_rules):
-      return self.model.token_embedder.embedding
+    pass
 
   def embed_input_ids(self, input_ids: jax.Array) -> jax.Array:
     """Embeds the input token IDs using the model's token embedder.
@@ -282,11 +278,7 @@ class MaxTextForCausalLM(nnx.Module):
     Returns:
       A JAX array of embedded input tokens.
     """
-    if not isinstance(self.model, nnx.Module):
-      raise ValueError("Model is not initialized.")
-
-    with self.mesh, nn.logical_axis_rules(self.maxtext_config.logical_axis_rules):
-      return self.model.token_embedder(input_ids)
+    pass
 
   def compute_logits(self, hidden_states: jax.Array) -> jax.Array:
     """Computes the logits from the hidden states using the underlying decoder model.
@@ -297,18 +289,7 @@ class MaxTextForCausalLM(nnx.Module):
     Returns:
       A JAX array of logits.
     """
-    if not isinstance(self.model, nnx.Module):
-      raise ValueError("Model is not initialized.")
-
-    with self.mesh, nn.logical_axis_rules(self.maxtext_config.logical_axis_rules):
-      # Reshape to (num_tokens, 1, hidden_dim) for decoder output head
-      y = jnp.expand_dims(hidden_states, axis=1)
-
-      # Compute logits using the MaxText decoder's output head
-      logits = self.model.decoder.apply_output_head(self.model.token_embedder, y, True, self.model_mode)
-
-      # Reshape back to (num_tokens, vocab_size)
-      return logits.squeeze(1)
+    pass
 
   def load_weights(self, rng_key: jax.Array) -> None:
     """Loads model weights using the underlying decoder model.

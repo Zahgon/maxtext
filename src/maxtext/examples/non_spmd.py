@@ -39,8 +39,6 @@ idx = jax.process_index()
 
 
 # Example step depends on idx which is different on each program
-def example_step():
-  return idx * jax.numpy.ones((idx + 1))
 
 
 jit_func = jax.jit(

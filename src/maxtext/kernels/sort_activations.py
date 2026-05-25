@@ -28,55 +28,20 @@ def route(
     use_gather_mosaic_kernel: bool,
 ) -> jax.Array:
   """Route tokens to selected experts."""
-  return _route_fwd(tokens, selected_experts, use_gather_mosaic_kernel)[0]
+  pass
 
 
-def _route_fwd(
-    tokens: jax.Array,
-    selected_experts: jax.Array,
-    use_gather_mosaic_kernel: bool,
-) -> tuple[jax.Array, jax.Array]:
-  return (
-      _route_impl(tokens, selected_experts, use_gather_mosaic_kernel),
-      selected_experts,
-  )
 
 
-def _route_bwd(
-    use_gather_mosaic_kernel: bool,
-    residuals: jax.Array,
-    grads: jax.Array,
-) -> tuple[jax.Array, None]:
-  selected_experts = residuals
-  return _unroute_impl(grads, selected_experts, use_gather_mosaic_kernel), None
 
 
 route.defvjp(_route_fwd, _route_bwd)
 
 
-@functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
-def unroute(
-    tokens: jax.Array,
-    selected_experts: jax.Array,
-    use_gather_mosaic_kernel: bool,
-) -> jax.Array:
-  return _unroute_fwd(tokens, selected_experts, use_gather_mosaic_kernel)[0]
 
 
-def _unroute_fwd(
-    tokens: jax.Array,
-    selected_experts: jax.Array,
-    use_gather_mosaic_kernel: bool,
-) -> tuple[jax.Array, jax.Array]:
-  return (
-      _unroute_impl(tokens, selected_experts, use_gather_mosaic_kernel),
-      selected_experts,
-  )
 
 
-def _unroute_bwd(use_gather_mosaic_kernel: bool, residuals: jax.Array, grads: jax.Array) -> tuple[jax.Array, None]:
-  selected_experts = residuals
-  return _route_impl(grads, selected_experts, use_gather_mosaic_kernel), None
 
 
 unroute.defvjp(_unroute_fwd, _unroute_bwd)
@@ -88,11 +53,7 @@ def _route_impl(
     use_gather_mosaic_kernel: bool,
 ) -> jax.Array:
   """Gather `tokens` according to `selected_experts`."""
-  assert (
-      tokens.shape[0] == selected_experts.shape[0] and selected_experts.ndim == 2
-  ), f"{tokens.shape=}, {selected_experts.shape=}"
-  inds = jnp.argsort(jnp.ravel(selected_experts)) // selected_experts.shape[1]
-  return _sort_impl(tokens, inds, use_gather_mosaic_kernel)
+  pass
 
 
 def _unroute_impl(
@@ -101,25 +62,6 @@ def _unroute_impl(
     use_gather_mosaic_kernel: bool,
 ) -> jax.Array:
   """Reverse the routing operation, restoring tokens to their original order."""
-  assert tokens.shape[0] == selected_experts.shape[0] * selected_experts.shape[1] and selected_experts.ndim == 2
-  inds = jnp.argsort(jnp.argsort(jnp.ravel(selected_experts)))
-  if use_gather_mosaic_kernel:
-    # The kernel currently only supports 8 experts per token.
-    assert selected_experts.shape[1] == 8
-    kernel = functools.partial(
-        gather_reduce_sc.sc_gather_reduce,
-        reduce_group_size=selected_experts.shape[1],
-        single_sc=True,
-    )
-    return kernel(tokens, inds)
-  return jnp.sum(
-      jnp.reshape(
-          _sort_impl(tokens, inds, use_gather_mosaic_kernel),
-          (-1, selected_experts.shape[1]) + tokens.shape[1:],
-      ),
-      axis=1,
-  )
+  pass
 
 
-def _sort_impl(tokens: jax.Array, inds: jax.Array, use_gather_mosaic_kernel: bool) -> jax.Array:
-  return tokens[inds, ...]

@@ -125,93 +125,6 @@ def flash_attention_block_masked(
   )
 
   # Outer loop over the key/value blocks.
-  def outer_loop_body(j, carried):
-    output, l, m = carried
-    k_j_slice = jax.lax.dynamic_slice_in_dim(k, j * block_kv, block_kv, axis=-2)
-    v_j_slice = jax.lax.dynamic_slice_in_dim(v, j * block_kv, block_kv, axis=-2)
-
-    # Inner loop over the query blocks.
-    def inner_loop_body(i, carried_inner):
-      output, l, m = carried_inner
-
-      # let's get the slice of Q in N dimension
-      q_slice = jax.lax.dynamic_slice_in_dim(q, i * block_q, block_q, axis=-2)
-
-      # Calculates the attention computation (Q@K.T)@V with online softmax for
-      # the current query and key/value blocks.
-      def compute_attention_block(output, l, m):
-        output_i_slice = jax.lax.dynamic_slice_in_dim(output, i * block_q, block_q, axis=-2)
-        l_i_slice = jax.lax.dynamic_slice_in_dim(l, i * block_q, block_q, axis=-1)
-        m_i_slice = jax.lax.dynamic_slice_in_dim(m, i * block_q, block_q, axis=-1)
-        s_i_j = jnp.einsum(
-            "bxhqc,bxkc->bxhqk",
-            q_slice,
-            k_j_slice,
-            preferred_element_type=data_type,
-        )
-        full_mask_i_j_slice = jax.lax.dynamic_slice(
-            mask_full,
-            (0, i * block_q, j * block_kv),
-            (batch_size, block_q, block_kv),
-        )
-        broadcasted_mask = jnp.broadcast_to(
-            full_mask_i_j_slice[:, None, None, :, :],
-            (batch_size, num_kv_heads, q_groups, block_q, block_kv),
-        )
-
-        s_i_j = jnp.where(broadcasted_mask, s_i_j, mask_value)
-        if cap is not None:
-          s_i_j = jnp.tanh(s_i_j / cap)
-          s_i_j = s_i_j * cap
-        m_i_j = s_i_j.max(axis=-1)
-        p_i_j = jnp.exp(s_i_j - m_i_j[..., None])
-        l_i_j = p_i_j.sum(axis=-1)
-        assert m_i_j.shape == m_i_slice.shape
-        m_i_new = jnp.maximum(m_i_slice, m_i_j)
-        m_i_difference = jnp.exp(m_i_slice - m_i_new)
-        m_i_j_difference = jnp.exp(m_i_j - m_i_new)
-        l_i_new = m_i_difference * l_i_slice + m_i_j_difference * l_i_j
-
-        divider = l_i_new[..., None]
-        numerator = l_i_slice[..., None] * m_i_difference[..., None] * output_i_slice + m_i_j_difference[
-            ..., None
-        ] * jnp.einsum(
-            "bxhqk,bxkc->bxhqc",
-            p_i_j,
-            v_j_slice,
-            preferred_element_type=data_type,
-        )
-
-        output_i_slice_new = numerator / divider
-        output = jax.lax.dynamic_update_index_in_dim(output, output_i_slice_new, i * block_q, axis=-2)
-        l = jax.lax.dynamic_update_index_in_dim(l, l_i_new, i * block_q, axis=-1)
-        m = jax.lax.dynamic_update_index_in_dim(m, m_i_new, i * block_q, axis=-1)
-        return output, l, m
-
-      def identity(output, l, m):
-        """A no-op identity function."""
-
-        return output, l, m
-
-      batch_size = mask_blocked.shape[0]
-      mask_i_j_slice = jax.lax.dynamic_slice(mask_blocked, (0, i, j), (batch_size, 1, 1))
-      # The compute_attention_block should be executed if at least one element
-      # in the slice is non-zero, meaning at least one batch requires work for
-      # this block.
-      output, l, m = jax.lax.cond(
-          jnp.any(jnp.not_equal(mask_i_j_slice, 0)),
-          compute_attention_block,
-          identity,
-          output,
-          l,
-          m,
-      )
-
-      return output, l, m
-
-    output, l, m = jax.lax.fori_loop(0, num_q_blocks, inner_loop_body, (output, l, m), unroll=True)
-
-    return (output, l, m)
 
   output, l, m = jax.lax.fori_loop(0, num_kv_blocks, outer_loop_body, (output, l, m), unroll=True)
 
@@ -243,14 +156,4 @@ def mask_blocker(mask: jnp.ndarray, block_q: int, block_kv: int) -> jnp.ndarray:
     A blocked mask where each element indicates the number of non-zero
     elements in the corresponding block of the original mask.
   """
-  batch_size, q_seq_len, kv_seq_len = mask.shape
-
-  if q_seq_len % block_q != 0:
-    raise ValueError(f"q_seq_len {q_seq_len} must be divisible by block_q {block_q}")
-  if kv_seq_len % block_kv != 0:
-    raise ValueError(f"kv_seq_len {kv_seq_len} must be divisible by block_kv {block_kv}")
-  q_blocks = q_seq_len // block_q
-  kv_blocks = kv_seq_len // block_kv
-
-  blocked_mask = mask.reshape(batch_size, q_blocks, block_q, kv_blocks, block_kv)
-  return jnp.count_nonzero(blocked_mask, axis=(2, 4)).astype(jnp.int32)
+  pass

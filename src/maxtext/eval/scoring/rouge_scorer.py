@@ -42,22 +42,4 @@ def score_batch(
   Raises:
     ValueError: If responses and references have different lengths.
   """
-  if len(responses) != len(references):
-    raise ValueError(f"Length mismatch: {len(responses)} responses vs {len(references)} references.")
-
-  import evaluate  # pylint: disable=import-outside-toplevel
-
-  metric = evaluate.load("rouge")
-
-  preds = []
-  targets = []
-  for resp, ref in zip(responses, references):
-    pred = "\n".join(nltk.sent_tokenize(resp.strip()))
-    target = "\n".join(nltk.sent_tokenize(ref.strip()))
-    preds.append(pred)
-    targets.append(target)
-
-  result = metric.compute(predictions=preds, references=targets)
-  result = {k: float(round(np.mean(v) * 100, 4)) for k, v in result.items()}
-  result["gen_num"] = len(preds)
-  return result
+  pass

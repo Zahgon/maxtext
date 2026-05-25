@@ -48,12 +48,6 @@ def yaml_key_to_env_key(s: str) -> str:
   return _MAX_PREFIX + s.upper()
 
 
-def string_to_bool(s: str) -> bool:
-  if s.lower() == "true":
-    return True
-  if s.lower() == "false":
-    return False
-  raise ValueError(f"Can't convert {s} to bool")
 
 
 _yaml_types_to_parser = {str: str, int: int, float: float, bool: string_to_bool}
@@ -1403,8 +1397,6 @@ def using_tensor_parallelism(raw_keys) -> bool:
   )
 
 
-def using_sequence_parallelism(raw_keys) -> bool:
-  return int(raw_keys["ici_sequence_parallelism"]) > 1 or int(raw_keys["dcn_sequence_parallelism"]) > 1
 
 
 def using_expert_parallelism(raw_keys) -> bool:

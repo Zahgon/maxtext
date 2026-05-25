@@ -30,8 +30,6 @@ from pathwaysutils.experimental import reshard as experimental_reshard
 from pathwaysutils.experimental import split_by_mesh_axis
 
 
-def _identity(x):
-  return x
 
 
 INTERMEDIATE_SPLIT_SUFFIX = "_intermediate_split"
@@ -256,44 +254,7 @@ def concatenate_prompt_with_completions(config, tokenizer_model, data, completio
     The `data` dictionary updated with the concatenated sequences and new
     segmentation and position information.
   """
-
-  def _concat_and_find_eos(prompt, true_len, completion):
-    total_len = prompt.shape[0] + completion.shape[0]
-    prompt_mask = jnp.arange(prompt.shape[0]) < true_len[0]
-    trimmed_prompt = jnp.where(prompt_mask, prompt, 0)
-
-    # Initialize with padded prompt
-    full_seq = jnp.zeros((total_len,), dtype=prompt.dtype)
-    full_seq = full_seq.at[: prompt.shape[0]].set(trimmed_prompt)
-
-    # Dynamically insert completion at true_len position
-    full_seq = jax.lax.dynamic_update_slice(full_seq, completion, (true_len[0],))
-
-    # Find EOS index
-    eos_mask = full_seq == tokenizer_model.eos_token_id
-    eos_indices = jnp.where(eos_mask, jnp.arange(total_len), total_len)
-    eos_index = jnp.min(eos_indices)
-
-    return full_seq, eos_index
-
-  batched_concat_and_eos = jax.vmap(_concat_and_find_eos, in_axes=(0, 0, 0))
-  prompts = data[config.train_data_columns]
-  true_length = data[f"{config.train_data_columns}_true_length"]
-  prompt_completions, eos_positions = batched_concat_and_eos(prompts, true_length, completions)
-  data[f"{config.train_data_columns}_completions"] = prompt_completions
-  data[f"{config.train_data_columns}_completions_segmentation"] = (
-      jnp.arange(data[f"{config.train_data_columns}_completions"].shape[1])[None, :] < eos_positions[:, None]
-  ).astype(jnp.int32)
-  data[f"{config.train_data_columns}_completions_position"] = jnp.where(
-      data[f"{config.train_data_columns}_completions_segmentation"],
-      jnp.arange(data[f"{config.train_data_columns}_completions"].shape[1]),
-      0,
-  )
-  completion_mask = data[f"{config.train_data_columns}_completions_position"] >= true_length - 1
-  data["ar_completions_segmentation"] = data[
-      f"{config.train_data_columns}_completions_segmentation"
-  ] * completion_mask.astype(jnp.int32)
-  return data
+  pass
 
 
 def pad_or_trim(arr, max_target_length, pad_token):
@@ -335,138 +296,12 @@ def filter_and_split(config, example_batch, num_groups, global_batch_size_per_gr
     `example_batch` but with values being arrays sliced for that group.
     Returns an empty list if not enough samples to form the required groups.
   """
-  if not example_batch:  # Handles None or empty dict
-    return []
-
-  if num_groups <= 0 or global_batch_size_per_group <= 0:
-    max_logging.log(
-        f"Warning: config_inference.inference_replicas ({num_groups}) or config_inference.per_device_batch_size "
-        f"({global_batch_size_per_group}) is not positive. Cannot split batch."
-    )
-    return []
-
-  total_samples_needed = num_groups * global_batch_size_per_group
-  total_samples_available = example_batch[config.train_data_columns].shape[0]
-  if total_samples_available < total_samples_needed:
-    max_logging.log(
-        f"Warning: Not enough samples ({total_samples_available}) in batch to create {num_groups} groups of size"
-        f" {global_batch_size_per_group} (needed {total_samples_needed}). Dropping batch."
-    )
-    return []
-
-  # Slice the required number of samples
-  sliced_batch = jax.tree_util.tree_map(lambda arr: arr[:total_samples_needed], example_batch)
-
-  list_of_output_batches = []
-  for i in range(num_groups):
-    current_group_dict = {}
-    start_index = i * global_batch_size_per_group
-    end_index = start_index + global_batch_size_per_group
-    for key, sliced_array in sliced_batch.items():
-      # Slice each group
-      current_group_dict[key] = sliced_array[start_index:end_index]
-    list_of_output_batches.append(current_group_dict)
-
-  return list_of_output_batches
+  pass
 
 
 def _maybe_find_intermediate_sharding(source_sharding, target_sharding):
   """Maybe finds an intermediate sharding to reshard to before target sharding."""
-  if not isinstance(source_sharding, jax.sharding.NamedSharding) or not isinstance(
-      target_sharding, jax.sharding.NamedSharding
-  ):
-    max_logging.log(
-        "None-NamedSharding does not need intermediate sharding." f" {source_sharding=}, {target_sharding=}",
-    )
-    return None
-  src_mesh = source_sharding.mesh
-  dst_mesh = target_sharding.mesh
-
-  def _get_sharding_dims(sharding, mesh):
-    sharding_dims = {}
-    used_mesh_axis_names = set()
-    for i, axis_name in enumerate(sharding.spec):
-      if axis_name is None:
-        sharding_dims[(i, None)] = 1
-      else:
-        if isinstance(axis_name, tuple):
-          used_mesh_axis_names |= set(axis_name)
-          shard_size = math.prod([mesh.shape[name] for name in axis_name])
-          first_axis_name = axis_name[0]
-          sharding_dims[(i, mesh.axis_names.index(first_axis_name))] = shard_size
-        else:
-          assert isinstance(axis_name, str), "axis_name expected to be a string or a tuple of strings."
-          used_mesh_axis_names.add(axis_name)
-          sharding_dims[(i, mesh.axis_names.index(axis_name))] = mesh.shape[axis_name]
-    largest_shards = max(sharding_dims.values()) if len(sharding_dims) else 1
-    if len(sharding_dims) < len(mesh.shape):
-      for mi, mesh_axis in enumerate(mesh.axis_names):
-        if mesh_axis not in used_mesh_axis_names:
-          sharding_dims[(None, mi)] = 1
-    return sharding_dims, largest_shards
-
-  src_sharding_dims, src_largest_shards = _get_sharding_dims(source_sharding, src_mesh)
-  dst_sharding_dims, dst_largest_shards = _get_sharding_dims(target_sharding, dst_mesh)
-  # Not able to handle resharding with undividable shardings.
-  if src_largest_shards % dst_largest_shards != 0:
-    return None
-
-  total_source_sharding_dims = math.prod(list(src_sharding_dims.values()))
-  total_dst_sharding_dims = math.prod(list(dst_sharding_dims.values()))
-
-  if total_source_sharding_dims <= total_dst_sharding_dims or total_source_sharding_dims % total_dst_sharding_dims != 0:
-    return None
-
-  new_split_dim_shards = None
-  new_split_axis = None
-  replicas = src_largest_shards // dst_largest_shards
-
-  # Find gcd(src_dim_shards, dst_dim_shards),
-  # If all of them are 1s, an all-gather is needed as the single replica of
-  # the source cannot be presented by any sharded form on the target devices.
-  gcd_shards = []
-  for (sharding_mesh_axis_idx, src_dim_shards), (_, dst_dim_shards) in zip(
-      src_sharding_dims.items(), dst_sharding_dims.items()
-  ):
-    gcd_dim_shards = math.gcd(src_dim_shards, dst_dim_shards)
-    if gcd_dim_shards == 1:
-      if src_dim_shards > dst_dim_shards and src_dim_shards == src_largest_shards:
-        new_split_axis = sharding_mesh_axis_idx
-        new_split_dim_shards = (src_dim_shards // replicas, replicas)
-    gcd_shards.append(gcd_dim_shards)
-  if math.prod(gcd_shards) != 1 or new_split_axis is None:
-    return None
-
-  # Generate the intermediate sharding.
-  new_split_mesh_axis_name = src_mesh.axis_names[new_split_axis[1]] + INTERMEDIATE_SPLIT_SUFFIX
-  new_split_mesh_replica_axis_name = src_mesh.axis_names[new_split_axis[1]] + INTERMEDIATE_REPLICA_SUFFIX
-  intermediate_mesh = jax.sharding.Mesh(
-      src_mesh.devices.reshape(
-          tuple(
-              list(src_mesh.devices.shape[: new_split_axis[1]])
-              + [new_split_dim_shards[0], new_split_dim_shards[1]]
-              + list(src_mesh.devices.shape[new_split_axis[1] + 1 :])
-          )
-      ),
-      axis_names=tuple(
-          list(src_mesh.axis_names[: new_split_axis[1]])
-          + [new_split_mesh_axis_name, new_split_mesh_replica_axis_name]
-          + list(src_mesh.axis_names[new_split_axis[1] + 1 :])
-      ),
-  )
-
-  intermediate_spec = tuple(
-      list(source_sharding.spec[: new_split_axis[0]])
-      + [new_split_mesh_axis_name]
-      + list(source_sharding.spec[new_split_axis[0] + 1 :])
-  )
-  intermediate_sharding = jax.sharding.NamedSharding(
-      intermediate_mesh,
-      jax.sharding.PartitionSpec(*intermediate_spec),
-      memory_kind=source_sharding.memory_kind,
-  )
-
-  return intermediate_sharding
+  pass
 
 
 def _experimental_pre_reshard(splitfn, src_pytree, target_shardings):
@@ -531,22 +366,7 @@ def _get_reshard_fn_pathwaysutils(
     use_experimental_pre_reshard: bool,
 ):
   """Returns a reshard function using pathwaysutils."""
-
-  def reshard_fn(
-      x: Any,
-      sharding: jax.sharding.Sharding | Any,
-  ):
-    if use_experimental_pre_reshard:
-      x = _experimental_pre_reshard(split_by_mesh_axis.split_by_mesh_axis, x, sharding)
-
-    return experimental_reshard.reshard(
-        x,
-        sharding,
-        donate=donate,
-        cache_resharding_plans=cache_resharding_plans,
-    )
-
-  return reshard_fn
+  pass
 
 
 def _get_reshard_fn(
@@ -580,15 +400,6 @@ def reshard_pytree(
 ) -> jaxtyping.PyTree:
   """Reshard input pytree from source sharding and mesh to target sharding and mesh."""
 
-  def _get_dst_sharding(x):
-    if isinstance(x, jax.sharding.NamedSharding | jax.sharding.SingleDeviceSharding):
-      return x
-    else:
-      return jax.sharding.NamedSharding(
-          x.sharding.mesh,
-          x.sharding.spec,
-          memory_kind=x.sharding.memory_kind,
-      )
 
   dst_shardings = jax.tree_util.tree_map(
       _get_dst_sharding,

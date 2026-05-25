@@ -151,11 +151,6 @@ def main(raw_args=None) -> None:
   jax_weights["decoder"]["layers"] = copy.deepcopy(layer_weight)
   jax_weights = jax.tree_util.tree_map(jnp.array, jax_weights)
 
-  def astype_fn(x):
-    if isinstance(x, jnp.ndarray):
-      return x.astype(jnp.bfloat16)
-    else:
-      return x
 
   jax_weights = jax.tree_util.tree_map(astype_fn, jax_weights)
 

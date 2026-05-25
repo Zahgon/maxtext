@@ -66,39 +66,7 @@ def get_test_dataset(config, tokenizer, data_template_path):
     A grain.MapDataset instance for the test split, with prompts and target
     answers.
   """
-
-  template_config = instruction_data_processing.load_data_template_from_file(data_template_path)
-  dataset = datasets.load_dataset(
-      DATASET_NAME,
-      data_dir=DATASET_DATA_DIR,
-      split=DATASET_TEST_SPLIT,
-      token=config.hf_access_token,
-  )
-
-  return (
-      grain.MapDataset.source(dataset)
-      .shuffle(seed=SEED)
-      .map(
-          lambda x: {
-              "question": x["question"],
-              "prompt": tokenizer.apply_chat_template(
-                  [
-                      {
-                          "role": "user",
-                          "content": (template_config["PROMPT_TEMPLATE"].format(question=x["question"].strip())),
-                      }
-                  ],
-                  tokenize=False,
-                  add_generation_prompt=True,
-              ),
-              "target_answer": (
-                  instruction_data_processing.extract_reasoning_and_answer(
-                      x["answer"], template_config["REASONING_ANSWER_SEPARATOR"]
-                  )[1]
-              ),
-          }
-      )
-  )
+  pass
 
 
 def evaluate_model(dataset, vllm_rollout, debug=True):
@@ -113,44 +81,7 @@ def evaluate_model(dataset, vllm_rollout, debug=True):
     A dictionary containing evaluation scores: 'correct', 'partially_correct',
     and 'correct_format' percentages.
   """
-  rollout_config = base_rollout.RolloutConfig(
-      max_tokens_to_generate=MAX_TOKENS_TO_GENERATE,
-      max_prompt_length=MAX_PROMPT_LENGTH,
-      temperature=EVALUATION_CONFIG["temperature"],
-      top_p=EVALUATION_CONFIG["top_p"],
-      top_k=EVALUATION_CONFIG["top_k"],
-      data_type="bfloat16",
-  )
-
-  total, total_correct, total_partially_correct, total_correct_format = 0, 0, 0, 0
-  for batch in tqdm(dataset):
-    batch_response = vllm_rollout.generate(batch["prompt"], rollout_config)
-    for i, question in enumerate(batch["question"]):
-      if debug:
-        print("========================================")
-        print(f"Question: {question}")
-        print("----------------------------------------")
-        print(f"Model Generated Response: {batch_response.text[i]}")
-        print("----------------------------------------")
-        print(f"Target Response: {batch["target_answer"][i]}")
-        print("========================================")
-
-      is_correct, is_partially_correct, has_correct_format = score_response(
-          target=batch["target_answer"][i], prediction=batch_response.text[i], debug=debug
-      )
-      if is_correct:
-        total_correct += 1
-      if is_partially_correct:
-        total_partially_correct += 1
-      if has_correct_format:
-        total_correct_format += 1
-      total += 1
-
-  return {
-      "correct": (total_correct / total) * 100,
-      "partially_correct": (total_partially_correct / total) * 100,
-      "correct_format": (total_correct_format / total) * 100,
-  }
+  pass
 
 
 def safe_string_to_float(text):
@@ -164,9 +95,7 @@ def safe_string_to_float(text):
   Returns:
     The cleaned string.
   """
-  text = text.replace(",", "").replace(" ", "")  # converts "2,125" to "2125"
-  text = text.replace("$", "")  # converts "$50" to "50"
-  return text
+  pass
 
 
 def score_response(target, prediction, debug=True):
@@ -183,24 +112,4 @@ def score_response(target, prediction, debug=True):
   Returns:
     A tuple of booleans: (is_correct, is_partially_correct, has_correct_format).
   """
-  is_correct, is_partially_correct, has_correct_format = False, False, False
-  extracted_response = guess.group(1) if (guess := MATCH_ANSWER.search(prediction)) is not None else ""
-  extracted_response = safe_string_to_float(extracted_response)
-  target = safe_string_to_float(target)
-  try:
-    # Check exact correctness
-    if float(extracted_response.strip()) == float(target.strip()):
-      is_correct = True
-
-    # Check partial correctness (within 10%)
-    ratio = float(extracted_response.strip()) / float(target.strip())
-    if 0.9 <= ratio <= 1.1:
-      is_partially_correct = True
-
-    if MATCH_FORMAT.search(prediction) is not None:
-      has_correct_format = True
-  except (ValueError, TypeError, ZeroDivisionError) as e:
-    if debug:
-      print("Evaluation exception: ", e)
-
-  return is_correct, is_partially_correct, has_correct_format
+  pass

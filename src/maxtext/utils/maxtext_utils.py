@@ -74,11 +74,6 @@ def assert_params_sufficiently_sharded(params, mesh, tolerance):
   return sharding.assert_params_sufficiently_sharded(params, mesh, tolerance)
 
 
-def add_data_to_sharding(mesh, path, aval, shardings):
-  max_logging.log(
-      "WARNING: Function maxtext_utils.add_data_to_sharding is deprecated. Please use sharding.add_data_to_sharding."
-  )
-  return sharding.add_data_to_sharding(mesh, path, aval, shardings)
 
 
 def maybe_update_params_sharding_with_opt(config, state_mesh_shardings):
@@ -130,12 +125,7 @@ def shard_reorder_causal_load_balanced(
     batch, cp_size, shard_mode, reorder_strategy=ReorderStrategy.DUAL_CHUNK_SWAP, hardware="tpu"
 ):
   """Shard the output of the reordered sequence."""
-  reordered = max_utils.reorder_causal_load_balanced(batch, cp_size, reorder_strategy, hardware)
-  for _, v in batch.items():
-    if isinstance(v, jax.Array):
-      reordered = sharding.maybe_shard_with_name(reordered, v.sharding, shard_mode)
-      break
-  return reordered
+  pass
 
 
 def get_reorder_callable(cp_size, shard_mode, reorder_strategy=ReorderStrategy.DUAL_CHUNK_SWAP, hardware="tpu"):
@@ -1321,10 +1311,6 @@ def update_state_param(state, target_path, value):
       path.append(jax.tree_util.DictKey(key=k))
     return tuple(path)
 
-  def _apply_update(path, param):
-    if path == updated_target_path:
-      return param + value
-    return param
 
   updated_target_path = create_jax_path(target_path)
   new_params = jax.tree_util.tree_map_with_path(_apply_update, state.params)
@@ -1339,8 +1325,7 @@ def init_decode_state(apply_fn, params) -> TrainState:
 
 def init_training_state(apply_fn, params, tx):
   """Init train state with null opt state for decode."""
-  state = TrainState.create(apply_fn=apply_fn, params=params, tx=tx)
-  return state
+  pass
 
 
 def init_initial_state(model, tx, config, is_training, key):
@@ -1351,26 +1336,7 @@ def init_initial_state(model, tx, config, is_training, key):
 
   Args: model, tx, config, is_training, key
   """
-  input_shape = (config.micro_batch_size_to_train_on, config.max_target_length)
-  image_shape = mm_processor.get_dummy_image_shape_for_init(
-      config.model_name, batch_size=config.micro_batch_size_to_train_on
-  )
-  audio_shape = mm_processor.get_dummy_audio_shape_for_init(config)
-  # Split the master key into independent keys for each RNG collection
-  # Reference: https://flax-linen.readthedocs.io/en/latest/guides/flax_fundamentals/rng_guide.html
-  params_key, dropout_key, aqt_key = jax.random.split(key, 3)
-
-  model_vars = model.init(
-      {"params": params_key, "dropout": dropout_key, "aqt": aqt_key},
-      np.ones(input_shape, dtype=jnp.int32),
-      np.ones(input_shape, dtype=jnp.int32),
-      encoder_images=np.ones(image_shape, dtype=jnp.int32) if config.use_multimodal else None,
-      encoder_audios=np.ones(audio_shape, dtype=jnp.float32) if config.use_audio else None,
-      # nnx_method="no_op",
-  )
-  if is_training:
-    return init_training_state(model.apply, model_vars, tx)
-  return init_decode_state(model.apply, model_vars)
+  pass
 
 
 def get_abstract_param(model, config):
@@ -1537,10 +1503,6 @@ def setup_initial_state(
             # Sparsity-init keeps freshly initialized params for any leaf still
             # represented as an abstract ShapeDtypeStruct in raw_params (i.e. not
             # actually restored), and uses the restored value otherwise.
-            def _merge_params(p_raw, p_init):
-              if isinstance(p_raw, jax.ShapeDtypeStruct):
-                return p_init
-              return p_raw
 
             merged_params = jax.tree_util.tree_map(_merge_params, raw_params, state.params)
             state = state.replace(params=merged_params)
@@ -1624,43 +1586,6 @@ def get_nnx_named_sharding_with_scan_axis(abs_var_state: nnx.State, mesh) -> nnx
     Same tree structure as abs_var_state but each Variable's value replaced with NamedSharding.
   """
 
-  def _make_named_sharding(v):
-    val = v.get_value()
-    if not hasattr(val, "shape"):
-      # Non-tensor value (e.g., optax MaskedNode for non-trainable params). Preserve
-      # as-is so the treedef matches abs_var_state in the downstream jax.tree.map.
-      return v
-    metadata = v.get_metadata()
-    out_sharding = metadata.get("out_sharding") or metadata.get("sharding_names") or metadata.get("sharding")
-    if not out_sharding:
-      pspec = PartitionSpec()
-    else:
-      # Insert the scan axis for parameters created by _create_scanned_layers.
-      # _add_scan_metadata stores the axis name in nnx.PARTITION_NAME and the
-      # axis index in "param_scan_axis". flax.nnx.spmd.get_var_pspec ignores these.
-      if nnx.PARTITION_NAME in metadata:
-        partition_name = metadata[nnx.PARTITION_NAME]
-        # Always use param_scan_axis from metadata. OptVariable (optimizer state) inherits
-        # param_scan_axis=1 from the model Param via to_opt_state(), so we must not hardcode
-        # scan_axis=0 for non-Param types. stacked_rest non-Param variables have
-        # param_scan_axis=0 set explicitly by _add_scan_metadata, so this is always correct.
-        scan_axis = metadata.get("param_scan_axis", 0)
-        out_sharding = [out_sharding] if isinstance(out_sharding, str) else list(out_sharding)
-        # Guard against double-insertion: Flax 0.12.6 _remap_sharding_metadata renames
-        # 'sharding' -> 'out_sharding', so _add_scan_metadata may have already inserted
-        # the scan axis. Only insert if not already present.
-        if partition_name not in out_sharding:
-          out_sharding.insert(scan_axis, partition_name)
-        out_sharding = tuple(out_sharding)
-      # Convert logical axis names to physical mesh axes using current context rules.
-      context_rules = get_logical_axis_rules()
-      local_rules = metadata.get("sharding_rules", ())
-      if context_rules or local_rules:
-        rules = composite_rules(context_rules, local_rules)
-        pspec = PartitionSpec(*from_sharding_rules(out_sharding, rules))
-      else:
-        pspec = PartitionSpec(*out_sharding)
-    return v.replace(NamedSharding(mesh, pspec))
 
   return jax.tree.map(_make_named_sharding, abs_var_state, is_leaf=lambda x: isinstance(x, nnx.Variable))
 
@@ -1753,27 +1678,6 @@ def get_abstract_state_nnx(config, mesh, nnx_init_trainstate_fn, is_training=Tru
 def get_prefill_kv_cache_annotations(model, config, rng, mesh, page_state: None | PageState = None):
   """Get a shaped abstraction of the state (including optimizer)"""
 
-  def init_kv_cache(model, config):
-    input_shape = (
-        config.micro_batch_size_to_train_on,
-        config.max_prefill_predict_length,
-    )
-    image_shape = mm_processor.get_dummy_image_shape_for_init(
-        config.model_name, batch_size=config.micro_batch_size_to_train_on
-    )
-    audio_shape = mm_processor.get_dummy_audio_shape_for_init(config)
-
-    model_vars = model.init(
-        {"params": rng, "dropout": rng, "aqt": rng},
-        jnp.ones(input_shape),
-        jnp.ones(input_shape),
-        encoder_images=jnp.ones(image_shape) if config.use_multimodal else None,
-        encoder_audios=jnp.ones(audio_shape) if config.use_audio else None,
-        model_mode=MODEL_MODE_PREFILL,
-        slot=0,
-        page_state=page_state,
-    )
-    return model_vars["cache"]
 
   with nn_partitioning.axis_rules(config.logical_axis_rules):
     init_kv_cache_partial = functools.partial(init_kv_cache, model, config)
@@ -1787,24 +1691,6 @@ def get_prefill_kv_cache_annotations(model, config, rng, mesh, page_state: None 
 def get_kv_cache_annotations(model, config, rng, mesh, page_state: None | PageState = None):
   """Get a shaped abstraction of the state (including optimizer)"""
 
-  def init_kv_cache(model, config):
-    input_shape = (config.micro_batch_size_to_train_on, 1)
-    image_shape = mm_processor.get_dummy_image_shape_for_init(
-        config.model_name, batch_size=config.micro_batch_size_to_train_on
-    )
-    audio_shape = mm_processor.get_dummy_audio_shape_for_init(config)
-
-    model_vars = model.init(
-        {"params": rng, "dropout": rng, "aqt": rng},
-        jnp.ones(input_shape),
-        jnp.ones(input_shape),
-        encoder_images=jnp.ones(image_shape) if config.use_multimodal else None,
-        encoder_audios=jnp.ones(audio_shape) if config.use_audio else None,
-        model_mode=MODEL_MODE_AUTOREGRESSIVE,
-        slot=0,
-        page_state=page_state,
-    )
-    return model_vars["cache"]
 
   with nn_partitioning.axis_rules(config.logical_axis_rules):
     init_kv_cache_partial = functools.partial(init_kv_cache, model, config)
@@ -1944,11 +1830,6 @@ def create_learning_rate_schedule(config):
   """
 
   def make_cos_schedule(init_lr, final_lr, len_steps):
-    def schedule(step):
-      pct = step / (len_steps - 1) if len_steps > 1 else 1.0
-      a = 0.5 * (jnp.cos(jnp.pi * pct) + 1)
-      lr = init_lr * a + final_lr * (1 - a)
-      return lr
 
     return schedule
 
@@ -2050,10 +1931,6 @@ def maybe_dump_jaxpr(config, p_train_step, train_step_inputs):
   # compilation/gRPC round-trips to the Pathways controller.
   unwrapped_step = getattr(p_train_step, "__wrapped__", p_train_step)
 
-  def to_abstract(x):
-    if hasattr(x, "shape") and hasattr(x, "dtype"):
-      return jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype)
-    return x
 
   # Convert all input arguments recursively to purely local abstract ShapeDtypeStruct objects
   # to completely bypass remote Array objects and proxy tracing overhead.

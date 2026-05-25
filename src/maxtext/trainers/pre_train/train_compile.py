@@ -101,14 +101,6 @@ def _collect_nnx_activation_shardings(create_model_fn, config, mesh):
   input_shape = (config.micro_batch_size_to_train_on, config.max_target_length)
   abstract_input = jax.ShapeDtypeStruct(input_shape, jnp.int32)
 
-  def _nnx_forward(decoder_input_tokens, decoder_positions, decoder_segment_ids):
-    model_instance = create_model_fn()
-    return model_instance(
-        decoder_input_tokens=decoder_input_tokens,
-        decoder_positions=decoder_positions,
-        decoder_segment_ids=decoder_segment_ids,
-        enable_dropout=False,
-    )
 
   with jax.set_mesh(mesh), nn_partitioning.axis_rules(config.logical_axis_rules):
     jax.eval_shape(_nnx_forward, abstract_input, abstract_input, abstract_input)
@@ -133,10 +125,6 @@ def get_shaped_inputs(topology_mesh, config):
 
   if config.pure_nnx:
 
-    def create_train_state_fn():
-      nnx_model = _create_model_partial()
-      optimizer = nnx.Optimizer(nnx_model, tx, wrt=nnx.Param)
-      return train_state_nnx.TrainStateNNX(nnx_model, optimizer)
 
     init_state_fn = create_train_state_fn
   else:

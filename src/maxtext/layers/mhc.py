@@ -30,39 +30,12 @@ def get_functions(expansion_rate: int):
 
   parallel paths (expand) and aggregate them back (reduce).
   """
-
-  def expand(x: Array):
-    # (batch, length, dim) -> (batch, length, streams, dim)
-    return jnp.repeat(jnp.expand_dims(x, axis=2), expansion_rate, axis=2).astype(x.dtype)
-
-  def reduce(x: Array):
-    # (batch, length, streams, dim) -> (batch, length, dim)
-    return jnp.sum(x, axis=2, dtype=x.dtype)
-
-  return expand, reduce
+  pass
 
 
 def sinkhorn(t, iters=20):
   """Computes the Sinkhorn normalization of a matrix (rows and columns sum to 1)."""
-  # Use float32 precision for numerical stability during normalization
-  initial_dtype = t.dtype
-  t = t.astype(jnp.float32)
-
-  # Column-wise normalization (axis=-2) - positive and sum up to 1 across columns
-  # Equivalent to t = exp(t) / jnp.sum(jnp.exp(t), axis=-2)
-  t = jax.nn.softmax(t, axis=-2)
-
-  def body_fun(i, val):
-    # L1 Normalization: val / sum(val) with clipping of denominator
-    # Normalize rows (axis -1)
-    val = val / jnp.clip(jnp.sum(val, axis=-1, keepdims=True), min=1e-12)
-    # Normalize columns (axis -2)
-    val = val / jnp.clip(jnp.sum(val, axis=-2, keepdims=True), min=1e-12)
-    return val
-
-  # Use lax.fori_loop for an efficient, JIT-friendly loop
-  t = jax.lax.fori_loop(0, iters, body_fun, t)
-  return t.astype(initial_dtype)
+  pass
 
 
 class ManifoldConstrainedHyperConnections(nnx.Module):
@@ -170,29 +143,11 @@ class ManifoldConstrainedHyperConnections(nnx.Module):
 
   def res_mapping(self, x: Array):
     """Helper function for residual mapping."""
-    # In MaxText, we match weight precision to activations before Matmul
-    res_alpha = jnp.asarray(self.res_alpha[...], self.dtype)
-    res_beta = jnp.asarray(self.res_beta[...], self.dtype)
-    res_alpha_scale = jnp.asarray(self.res_alpha_scale[...], self.dtype)
-    # Apply projection: (b, s, k*d) @ (k*d, k*k) -> (b, s, k*k)
-    h_res = jnp.einsum("bsm,mn -> bsn", x, res_alpha, precision=self.matmul_precision)
-    b, s, _ = h_res.shape
-    h_res = jnp.reshape(h_res, (b, s, self.k, self.k))
-    intermediate = res_alpha_scale * h_res + res_beta[None, None, :, :]
-    output = sinkhorn(intermediate, self.sinkhorn_iterations)
-    return output
+    pass
 
   def mapping(self, x: Array, alpha_scale: Array, alpha: Array, beta: Array, scale: int):
     """Helper function for both pre and post mappings."""
-    # In MaxText, we match weight precision to activations before Matmul
-    alpha = jnp.asarray(alpha, self.dtype)
-    beta = jnp.asarray(beta, self.dtype)
-    alpha_scale = jnp.asarray(alpha_scale, self.dtype)
-    # Apply projection: (b, s, k*d) @ (k*d, k) -> (b, s, k)
-    h = jnp.einsum("bsm,mk -> bsk", x, alpha, precision=self.matmul_precision)
-    intermediate = alpha_scale * h + beta[None, None, :]
-    output = scale * jax.nn.sigmoid(intermediate)
-    return output
+    pass
 
   def __call__(
       self,

@@ -70,16 +70,7 @@ class SyntheticDataIterator:
   @staticmethod
   def raw_generate_synthetic_data(config: pyconfig.HyperParameters, data):
     """Generates a single batch of synthetic data"""
-    tokens, positions, segmentation = data
-
-    output = {}
-    output["inputs"] = tokens[:, :-1]
-    output["inputs_position"] = positions[:, :-1]
-    output["inputs_segmentation"] = segmentation
-    output["targets"] = tokens[:, 1:]
-    output["targets_position"] = positions[:, 1:]
-    output["targets_segmentation"] = segmentation
-    return output
+    pass
 
 
 class PlaceHolderDataIterator:

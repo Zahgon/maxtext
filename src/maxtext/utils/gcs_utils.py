@@ -175,27 +175,7 @@ def gcs_delete_directory(directory_path: str):
   Args:
       directory_path: The GCS path (gs://...) representing the "directory" to delete.
   """
-  if not _gcs_guard("gcs_delete_directory"):
-    return
-  storage_client = storage.Client()
-  bucket_name, directory_prefix = parse_gcs_bucket_and_prefix(directory_path)
-  bucket = storage_client.bucket(bucket_name)
-
-  # Ensures the prefix has a trailing slash to avoid deleting more than intended.
-  if not directory_prefix.endswith("/"):
-    directory_prefix += "/"
-
-  blobs = list(bucket.list_blobs(prefix=directory_prefix))
-  if blobs:
-    # Uses a ThreadPoolExecutor to delete blobs in parallel to match gsutil -m performance.
-    def _delete_blob(blob):
-      try:
-        blob.delete()
-      except Exception as e:  # pylint: disable=broad-except
-        max_logging.log(f"Error deleting blob {blob.name}: {e}")
-
-    with ThreadPoolExecutor(max_workers=32) as executor:
-      executor.map(_delete_blob, blobs)
+  pass
 
 
 def gcs_glob_pattern(pattern):

@@ -41,17 +41,10 @@ class TokenizerTransformBase:
     if isinstance(self.sequence_length, int):
       self.sequence_length = [self.sequence_length] * len(self.feature_names)
 
-  def _get_processor(self):
-    if self._processor is None:
-      with self._initialize_processor_lock:
-        if self._processor is None:  # Ensures only one thread initializes processor.
-          self._processor = self.tokenizer
-    return self._processor
 
   def _encode(self, text: str) -> list[int]:
     """Common method to encode text using the tokenizer."""
-    processor = self._get_processor()
-    return processor.encode(text)
+    pass
 
   def __getstate__(self):
     state = self.__dict__.copy()
@@ -71,11 +64,7 @@ class TokenizeAndTrim(TokenizerTransformBase, grain.MapTransform):
 
   def map(self, element: dict[str, Any]) -> dict[str, Any]:
     """Maps to each element."""
-    for feature_name, max_length in zip(self.feature_names, self.sequence_length, strict=True):
-      text = element[feature_name]
-      token_ids = self._encode(text)[:max_length]
-      element[feature_name] = np.asarray(token_ids, dtype=np.int32)
-    return element
+    pass
 
 
 @dataclasses.dataclass
@@ -94,18 +83,4 @@ class TokenizeAndChunk(TokenizerTransformBase, grain.experimental.FlatMapTransfo
 
   def flat_map(self, element: dict[str, Any]) -> list[dict[str, Any]]:
     """Tokenize and chunk text into multiple examples of sequence length."""
-    text = element[self.feature_name]
-    chunk_size = self.sequence_length
-
-    token_ids = self._encode(text)
-
-    if not token_ids:
-      return []
-
-    output_elements = []
-    for start_idx in range(0, len(token_ids), chunk_size):
-      chunk = np.asarray(token_ids[start_idx : start_idx + chunk_size], dtype=np.int32)
-      new_element = {self.feature_name: chunk}
-      output_elements.append(new_element)
-
-    return output_elements
+    pass

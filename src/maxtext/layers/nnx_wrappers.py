@@ -48,92 +48,34 @@ def is_vanilla_variable(vs: variablelib.Variable) -> bool:
 
   Returns False only if it has non-empty hooks or any non-built-in attribute.
   """
-  for key, value in vs.get_metadata().items():
-    if key.endswith("_hooks"):
-      if value != ():
-        return False
-    else:
-      return False
-  return True
+  pass
 
 
-def to_linen_var(vs: variablelib.Variable) -> meta.AxisMetadata:
-  metadata = vs.get_metadata()
-  if "linen_meta_type" in metadata:
-    linen_type = metadata["linen_meta_type"]
-    if hasattr(linen_type, "from_nnx_metadata"):
-      return linen_type.from_nnx_metadata({"value": vs.get_value(), **metadata})
-    return linen_type(vs.get_value(), **metadata)
-  if is_vanilla_variable(vs):
-    return vs.get_value()
-  return nnx.bridge.NNXMeta(vs.type, vs.get_value(), metadata)
 
 
 def get_col_name(keypath: tp.Sequence[Any]) -> str:
   """Given the keypath of a Flax variable type, return its Linen collection name."""
-  # Infer variable type from the leaf's path, which contains its Linen collection name
-  assert isinstance(keypath[0], jax.tree_util.DictKey)
-  return str(keypath[0].key)
+  pass
 
 
 def to_nnx_var(col: str, x: meta.AxisMetadata | Any) -> variablelib.Variable:
   """Convert a Linen variable to an NNX variable."""
-  vtype = variablelib.variable_type_from_name(col, allow_register=True)
-  if isinstance(x, nnx.bridge.NNXMeta):
-    assert vtype == x.var_type, f"Type stored in NNXMeta {x.var_type} != type inferred from collection name {vtype}"
-    return x.to_nnx_variable()
-  if isinstance(x, meta.AxisMetadata):
-    x_metadata = vars(x)
-    if hasattr(x, "to_nnx_metadata"):
-      x_metadata = x.to_nnx_metadata()
-    assert hasattr(x, "value")
-    return vtype(**x_metadata, linen_meta_type=type(x))
-  return vtype(x)
+  pass
 
 
 def _recursive_merge(dict1, dict2):
   """Recursively merge two dicts."""
-  flat_map = nnx.traversals.flatten_mapping(dict1)
-  flat_map |= nnx.traversals.flatten_mapping(dict2)
-  return nnx.traversals.unflatten_mapping(flat_map)
+  pass
 
 
 def linen_vars_to_nnx_attrs(variables: tp.Mapping[str, Any]) -> dict[str, Any]:
   """Convert a dict of Linen-style variables to NNX variables."""
-  nnx_vars = jax.tree_util.tree_map_with_path(
-      lambda kp, x: to_nnx_var(get_col_name(kp), x),
-      variables,
-      is_leaf=lambda x: not isinstance(x, dict),
-  )
-
-  flat_paths: dict[tuple, tp.Any] = {}
-
-  for col_name, col_variables in nnx_vars.items():  # pylint: disable=unused-variable
-    for path, variable in nnx.traversals.flatten_mapping(col_variables).items():
-      if path in flat_paths:
-        raise ValueError(
-            f"Found duplicate variable path {path} with variables "
-            f"{flat_paths[path]} and {variable}. "
-            "This is not allowed in NNX."
-        )
-      flat_paths[path] = variable
-
-  nnx_vars = nnx.traversals.unflatten_mapping(flat_paths)
-  return nnx_vars
+  pass
 
 
 def nnx_attrs_to_linen_vars(nnx_attrs: dict) -> dict:
   """Convert a dict of NNX variables (or variable states) to Linen-style variables."""
-  linen_structured = {}
-  for kp, v in nnx.traversals.flatten_mapping(nnx_attrs).items():
-    if isinstance(v, variablelib.Variable):
-      col_name = variablelib.variable_name_from_type(v.type)
-      v = to_linen_var(v)
-    else:
-      raise ValueError(f"Cannot infer collection name from value: {v}")
-    linen_structured[(col_name, *kp)] = v
-  variables = nnx.traversals.unflatten_mapping(linen_structured)
-  return variables
+  pass
 
 
 def _set_initializing(module: Module, initializing: bool):
@@ -163,9 +105,7 @@ def lazy_init(fn: Module | tp.Callable[..., tp.Any], *args, **kwargs):
 
 def current_linen_module() -> linen.Module | None:
   """Get the current Linen module from the Linen context."""
-  if linen.module._context.module_stack:  # pylint: disable=W0212
-    return linen.module._context.module_stack[-1]  # pylint: disable=W0212
-  return None
+  pass
 
 
 def is_linen_initializing() -> bool:
@@ -174,10 +114,7 @@ def is_linen_initializing() -> bool:
   Used by NNX pipeline modules to short-circuit the scan during init,
   where only the output shape/dtype is needed.
   """
-  module = current_linen_module()
-  if module is not None and hasattr(module, "is_initializing") and callable(module.is_initializing):
-    return module.is_initializing()
-  return False
+  pass
 
 
 def _refresh_variable_trace_state(module: Module) -> None:
@@ -188,9 +125,7 @@ def _refresh_variable_trace_state(module: Module) -> None:
   context and breaks ``nnx.split`` with "Cannot extract graph node from different
   trace level". Resets ``_trace_state`` on any Variable whose ``_can_update`` is False.
   """
-  for _, v in nnx.graph.iter_graph(module):
-    if isinstance(v, variablelib.Variable) and not v._can_update:  # pylint: disable=protected-access
-      object.__setattr__(v, "_trace_state", nnx_tracers.TraceState())
+  pass
 
 
 class ToNNX(Module):
@@ -322,29 +257,12 @@ class ToNNX(Module):
 
 def linen_rngs_dict(linen_module: linen.Module, add_default: bool = False):
   """Given a module, split out one of its every active RNG key collections."""
-  assert linen_module.scope is not None, "linen_rngs_dict() must be called inside a Linen module."
-  rngs: dict[str, tp.Any] = {name: linen_module.make_rng(name) for name in linen_module.scope.rngs.keys()}
-  if add_default and "default" not in rngs:
-    rngs["default"] = 0
-  return rngs
+  pass
 
 
 def _get_module_method(module, method: tp.Callable[..., Any] | str | None):
   """Get a callable method from the module, or raise TypeError."""
-  if method is None:
-    method = "__call__"
-
-  if isinstance(method, str):
-    attribute_name = method
-    method = getattr(type(module), attribute_name)
-    if not callable(method):
-      class_name = type(module).__name__
-      raise TypeError(f"'{class_name}.{attribute_name}' must be a callable, got {type(method)}.")
-  if not callable(method):
-    class_name = type(module).__name__
-    raise TypeError(f"'{method}' must be a callable, got {type(method)}.")
-
-  return method
+  pass
 
 
 def _fix_for_qwix_quantization(module: Module):
@@ -360,39 +278,7 @@ def _fix_for_qwix_quantization(module: Module):
   Args:
     module: The NNX module to be processed.
   """
-
-  # Wrap the __call__ function of the nnx modules to make sure the linen module
-  # path is updated correctly.
-  def wrap(call_fn, name: str):
-    def wrapped(*args, **kwargs):
-      if not linen.module._context.module_stack:  # pylint: disable=W0212
-        return call_fn(*args, **kwargs)
-      nn_module = linen.module._context.module_stack[-1]  # pylint: disable=W0212
-      old_path = nn_module.path
-      # We modify the path of the current nn module in place. This is a little
-      # bit hacky but should be good as a temporary solution.
-      nn_module.scope.path += (name,)
-      try:
-        return call_fn(*args, **kwargs)
-      finally:
-        nn_module.scope.path = old_path
-
-    return wrapped
-
-  for path, node in nnx.iter_graph(module):
-    # Only enable it on non-root nnx modules.
-    if path and isinstance(node, nnx.Module):
-      node.__class__ = type(
-          node.__class__.__name__,
-          (node.__class__,),
-          {
-              "__call__": wrap(node.__class__.__call__, str(path[-1])),
-          },
-      )
-
-  # Set the correct weight names. We call QtProvider.process_model_inputs here
-  # to avoid using Qwix internal APIs.
-  qwix.QtProvider.process_model_inputs(None, module, None, None)  # pytype: disable=wrong-arg-types
+  pass
 
 
 class ToLinen(linen.Module):
@@ -445,12 +331,6 @@ class ToLinen(linen.Module):
 
   @linen.compact
   def __call__(self, *args, nnx_method: tp.Callable[..., Any] | str | None = None, **kwargs):
-    def _module_kwargs():
-      maybe_add_default = not self.is_initializing()
-      module_kwargs = dict(self.kwargs)
-      if not self.skip_rng:
-        module_kwargs["rngs"] = nnx.Rngs(**linen_rngs_dict(self, add_default=maybe_add_default))
-      return module_kwargs
 
     # init codepath
     if self.is_initializing():
@@ -476,10 +356,6 @@ class ToLinen(linen.Module):
       module = self.nnx_module_augment_fn(module, self.name)
 
     # update nnx module from linen variables
-    def maybe_unbox(x):
-      if isinstance(x, meta.AxisMetadata):
-        return x.unbox()
-      return x
 
     states = jtu.tree_map(
         maybe_unbox,
@@ -524,38 +400,7 @@ class ToLinen(linen.Module):
 
   def _update_variables(self, module):
     """Store the NNX module's graph def and state inside Linen module variables."""
-    state = nnx.state(module, nnx.Not(nnx.RngState))
-
-    collection_flat_state: dict[str, list[tuple[tuple[str, ...], tp.Any]]] = {}
-
-    # group state by collection
-    for path, leaf in nnx.to_flat_state(state):
-      type_ = leaf.type if isinstance(leaf, nnx.Variable) else type(leaf)
-      collection = variablelib.variable_name_from_type(type_, allow_register=True)
-      if collection not in collection_flat_state:
-        collection_flat_state[collection] = []
-      collection_flat_state[collection].append((path, leaf))
-
-    # update linen variables
-    for collection, flat_state in collection_flat_state.items():
-      if self.is_mutable_collection(collection):
-
-        def _to_linen_var(x):
-          if isinstance(x, nnx.Variable):
-            if self.metadata_fn is not None:
-              return self.metadata_fn(x)  # pylint: disable=too-many-function-args
-            else:
-              return x.get_value()
-          return x
-
-        collection_state = nnx.traversals.unflatten_mapping(flat_state)
-        collection_state = jax.tree.map(
-            _to_linen_var,
-            collection_state,
-            is_leaf=lambda x: isinstance(x, nnx.Variable),
-        )
-        for k, v in collection_state.items():
-          self.put_variable(collection, k, v)
+    pass
 
 
 class _Missing:

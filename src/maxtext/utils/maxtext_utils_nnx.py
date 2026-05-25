@@ -112,9 +112,7 @@ def move_memory_to_host(path: tuple[str, ...], x: NamedSharding) -> NamedShardin
   Returns:
     the NamedSharding with memory_kind set to "pinned_host"
   """
-  max_logging.log(f"max_utils.py: Moving {path} to host")
-  # Create the new sharding with the target memory kind
-  return x.with_memory_kind(kind="pinned_host")
+  pass
 
 
 def move_memory_to_device(path: tuple[str, ...], x: NamedSharding) -> NamedSharding:
@@ -129,9 +127,7 @@ def move_memory_to_device(path: tuple[str, ...], x: NamedSharding) -> NamedShard
   Returns:
     the NamedSharding with memory_kind set to "device"
   """
-  max_logging.log(f"max_utils.py: Moving {path} to device")
-  # Create the new sharding with the target memory kind
-  return x.with_memory_kind(kind="device")
+  pass
 
 
 def create_nnx_sharded_model(
@@ -178,12 +174,5 @@ def create_nnx_sharded_model(
 def nnx_ensure_scan_leading_axis(tree, length):
   """Broadcasts scalar-like variables to have a leading scan axis."""
 
-  def _op(x):
-    is_var = isinstance(x, nnx.Variable)
-    val = x.get_value() if is_var else x
-    if hasattr(val, "shape") and len(val.shape) == 0:
-      new_val = jax.numpy.broadcast_to(val, (length,))
-      return x.replace(value=new_val) if is_var else new_val
-    return x
 
   return jax.tree.map(_op, tree, is_leaf=lambda x: isinstance(x, nnx.Variable))

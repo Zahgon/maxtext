@@ -91,30 +91,7 @@ class Llama4UnfoldConvolution(nnx.Module):
 
 def pixel_shuffle(input_tensor: Array, shuffle_ratio: float) -> Array:
   """Apply pixel shuffle operation to the input tensor."""
-  batch_size, num_patches, channels = input_tensor.shape
-  patch_size = int(math.sqrt(num_patches))
-
-  # Reshape to [batch_size, patch_size, patch_size, channels]
-  input_tensor = input_tensor.reshape(batch_size, patch_size, patch_size, -1)
-  batch_size, height, width, channels = input_tensor.shape
-
-  # Reshape to [batch_size, height, width * shuffle_ratio, channels / shuffle_ratio]
-  reshaped_tensor = input_tensor.reshape(batch_size, height, int(width * shuffle_ratio), int(channels / shuffle_ratio))
-
-  # Transpose to [batch_size, width * shuffle_ratio, height, channels / shuffle_ratio]
-  reshaped_tensor = reshaped_tensor.transpose(0, 2, 1, 3)
-
-  # Reshape to [batch_size, height * shuffle_ratio, width * shuffle_ratio, channels / (shuffle_ratio^2)]
-  reshaped_tensor = reshaped_tensor.reshape(
-      batch_size, int(height * shuffle_ratio), int(width * shuffle_ratio), int(channels / (shuffle_ratio**2))
-  )
-
-  # Transpose to [batch_size, width * shuffle_ratio, height * shuffle_ratio, channels / (shuffle_ratio^2)]
-  reshaped_tensor = reshaped_tensor.transpose(0, 2, 1, 3)
-
-  # Reshape back to [batch_size, num_patches, channels]
-  output_tensor = reshaped_tensor.reshape(batch_size, -1, reshaped_tensor.shape[-1])
-  return output_tensor
+  pass
 
 
 class Llama4VisionMLP(nnx.Module):
@@ -254,15 +231,6 @@ class Llama4MultiModalProjector(nnx.Module):
     return hidden_states
 
 
-def llama4multimodalprojector_as_linen(config: Config, mesh: Mesh):
-  return nnx_wrappers.to_linen(
-      Llama4MultiModalProjector,
-      config=config,
-      mesh=mesh,
-      name="Llama4MultiModalProjector_0",
-      abstract_init=False,
-      metadata_fn=initializers.variable_to_logically_partitioned,
-  )
 
 
 def determine_is_nope_layer(layer_id: int, nope_layer_interval: int) -> bool:
@@ -432,9 +400,6 @@ class Llama4DecoderLayer(nnx.Module):
     else:
       self.activation_axis_names = ("activation_batch", "activation_norm_length", "activation_embed")
 
-  @property
-  def moe_block(self):
-    return self.Llama4MoEBlock_0
 
   def __call__(
       self,
@@ -513,10 +478,6 @@ class Llama4DecoderLayer(nnx.Module):
 
     if is_scan_carry:
 
-      def update_cache(cache, val):
-        if jnp.size(val) > 0:
-          return cache.at[layer_idx].set(val)
-        return cache
 
       stacked_kv_cache = jax.tree_util.tree_map(update_cache, stacked_kv_cache, kv_cache)
       return (layer_output, stacked_kv_cache, layer_idx + 1), None
@@ -819,12 +780,3 @@ class Llama4VisionModel(nnx.Module):
     return hidden_states
 
 
-def llama4visionmodel_as_linen(config: Config, mesh: Mesh) -> nn.Module:
-  return nnx_wrappers.to_linen(
-      Llama4VisionModel,
-      config=config,
-      mesh=mesh,
-      name="Llama4VisionModel_0",
-      abstract_init=False,
-      metadata_fn=initializers.variable_to_logically_partitioned,
-  )

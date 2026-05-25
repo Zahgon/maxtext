@@ -814,22 +814,7 @@ def get_chunked_index(token_indices: jax.Array, tokens_per_chunk: int, remove_in
       - Chunk 1: indices 3-5 (values 105, 150 are >= 100 and < 200)
       - Chunk 2: indices 5-6 (value 250 is >= 200)
   """
-  chunks = []
-  i = 0
-  start_idx = 0
-  current_chunk = 1
-
-  while i < len(token_indices):
-    if token_indices[i] - remove_index >= current_chunk * tokens_per_chunk:
-      chunks.append((start_idx, i))
-      start_idx = i
-      current_chunk += 1
-    i += 1
-
-  # Append final chunk
-  chunks.append((start_idx, len(token_indices)))
-
-  return chunks
+  pass
 
 
 def get_rope_index(

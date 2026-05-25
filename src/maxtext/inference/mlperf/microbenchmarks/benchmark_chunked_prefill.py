@@ -57,8 +57,6 @@ _BENCHMARK_ITERS = 5
 
 @jax.jit
 def _copy(cache):
-  def _array_copy(x):
-    return x.copy()
 
   return jax.tree.map(_array_copy, cache)
 
@@ -115,13 +113,6 @@ def benchmark_chunked_prefill(
     The average time taken for chunked prefill.
   """
 
-  def run_chunked_prefill_utility():
-    prefill_result, _ = chunked_prefill.do_chunked_prefill(
-        prefill_engine=engine,
-        prefill_params=params,
-        chunked_tokens_list=chunked_tokens_list,
-    )
-    return prefill_result
 
   # Benchmark standard chunked prefill (no caching)
   average_time = _run_benchmark_loop(run_chunked_prefill_utility, _BENCHMARK_ITERS, "standard chunked prefill")
@@ -270,37 +261,6 @@ def benchmark_prefix_cache_loop(
 
   print("\n--- Starting Prefix Cache Benchmark ---")
 
-  def run_chunked_prefill_with_prefix_caching(cache_hit_chunk: int, need_save: bool):
-    tokens_list = tokens.tolist()
-
-    # Load from cache (simulates reading)
-    existing_prefix, _ = prefix_cache.load_existing_prefix_and_get_remain_tokens(prefix_cache_inst, tokens, chunk_size)
-    assert existing_prefix is not None, "Should hit in benchmark"
-
-    # Perform chunked prefill on remaining tokens
-    prefill_result, _ = chunked_prefill.do_chunked_prefill(
-        prefill_engine=engine,
-        prefill_params=params,
-        chunked_tokens_list=chunked_tokens_list[cache_hit_chunk:],  # Pass only the remaining chunks
-        existing_prefix=existing_prefix if cache_hit_chunk > 0 else None,  # Pass existing prefix if hit
-    )
-
-    # Simulate save to cache
-    if need_save:
-
-      # Assume save will happen
-      run_time[0] += 1
-      prefix_cache_inst.save(
-          tuple(tokens_list + [run_time[0]]),  # Prevent key existed.
-          prefix_cache.Value(
-              prefix=_copy(prefill_result["cache"]),
-              true_length=len(tokens_list),
-              padded_length=len(tokens_list),
-              tokens=tuple(tokens_list),
-          ),
-      )
-
-    return prefill_result
 
   for cache_hit_chunk in range(len(chunked_tokens_list)):
     for need_save in [True, False]:

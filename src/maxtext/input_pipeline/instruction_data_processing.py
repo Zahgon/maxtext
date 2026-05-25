@@ -74,82 +74,14 @@ def load_chat_template_from_file(template_path):
 
 def get_template_placeholders(template):
   """Dynamically extracts the format keys (placeholders) from a template string."""
-  # Finds all names inside {...}
-  return set(re.findall(r"(?<!{){([a-zA-Z0-9_]+)}(?!})", template))
+  pass
 
 
-def extract_reasoning_and_answer(text, separator):
-  if separator not in text:
-    return None, None
-  [reasoning, answer] = text.split(separator)
-  return reasoning, answer
 
 
 def math_qa_formatting(example, template_config=None):
   """Maps question-answer pairs to conversational format."""
-
-  # Initialize prompt and completion with fallback templates
-  prompt = {"role": "user", "content": example["question"]}
-  completion = {"role": "assistant", "content": example["answer"]}
-
-  # Apply templates to prompt and completion, if provided
-  if template_config:
-    # Apply PROMPT_TEMPLATE to prompt, if provided
-    if "PROMPT_TEMPLATE" in template_config:
-      placeholders = get_template_placeholders(template_config["PROMPT_TEMPLATE"])
-      if "question" not in placeholders:
-        max_logging.log("PROMPT_TEMPLATE has no 'question' placeholder. No template will be applied to prompt.")
-      else:
-        prompt = {
-            "role": "user",
-            "content": template_config["PROMPT_TEMPLATE"].format(question=example["question"].strip()),
-        }
-    else:
-      max_logging.log("PROMPT_TEMPLATE is empty. No template will be applied to prompt.")
-
-    # Apply COMPLETION_TEMPLATE to completion, if provided
-    if "COMPLETION_TEMPLATE" in template_config:
-      placeholders = get_template_placeholders(template_config["COMPLETION_TEMPLATE"])
-      if "REASONING_ANSWER_SEPARATOR" in template_config:
-        reasoning, answer = extract_reasoning_and_answer(example["answer"], template_config["REASONING_ANSWER_SEPARATOR"])
-        if "reasoning" not in placeholders or "answer" not in placeholders:
-          max_logging.log(
-              "COMPLETION_TEMPLATE is missing 'reasoning' or 'answer' placeholder."
-              " No template will be applied to completion."
-              " Remove REASONING_ANSWER_SEPARATOR from template or update COMPLETION_TEMPLATE."
-          )
-        elif reasoning is None or answer is None:
-          max_logging.log(
-              "REASONING_ANSWER_SEPARATOR is present in template but not found in answer."
-              " No template will be applied to completion."
-              " Update REASONING_ANSWER_SEPARATOR in the template."
-          )
-        else:
-          completion = {
-              "role": "assistant",
-              "content": template_config["COMPLETION_TEMPLATE"].format(
-                  reasoning=reasoning.strip(), answer=answer.strip()
-              ),
-          }
-      else:
-        max_logging.log(
-            "REASONING_ANSWER_SEPARATOR not found in chat template."
-            " Using only 'answer' placeholder for COMPLETION_TEMPLATE."
-        )
-        if "answer" not in placeholders:
-          max_logging.log(
-              "COMPLETION_TEMPLATE is missing 'answer' placeholder. No template will be applied to completion."
-          )
-        else:
-          completion = {
-              "role": "assistant",
-              "content": template_config["COMPLETION_TEMPLATE"].format(answer=example["answer"].strip()),
-          }
-    else:
-      max_logging.log("COMPLETION_TEMPLATE is empty. No template will be applied to completion.")
-
-  example["messages"] = [prompt, completion]
-  return example
+  pass
 
 
 def load_formatter(formatting_func_path, **kwargs):

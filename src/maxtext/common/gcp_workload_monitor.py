@@ -75,113 +75,19 @@ class GCPWorkloadMonitor:
 
   def _report_heartbeat_thread(self, interval: int):
     """Reports heartbeat metric to GCP every {interval} seconds until termination event is set."""
-    local_rank = os.getenv("LOCAL_RANK", "0")
-    global_rank = jax.process_index()
-    while not self.termination_event.is_set():
-      self._report_heartbeat(local_rank, str(global_rank))
-      time.sleep(interval)
+    pass
 
   def _report_performance_thread(self, metrics_queue: queue.Queue):
     """Reports performance metric to GCP whenever new metric arrives at the metrics_queue until termination event is set."""
-    while not self.termination_event.is_set():
-      try:
-        # adding a timeout of 1s to ensure we don't block indefinitely and miss the stop event
-        performance_metric = metrics_queue.get(timeout=1)
-        self._report_performance(performance_metric)
-      except queue.Empty:
-        continue
+    pass
 
   def _report_heartbeat(self, local_rank: str, global_rank: str):
     """Reports heartbeat metric for the process specified by the given local rank & global rank."""
-    if not _GCLOUD_AVAILABLE:
-      max_logging.log("[DECOUPLED NO-OP] heartbeat metric skipped (google monitoring unavailable).")
-      return
-    try:
-      now = time.time()
-      seconds = int(now)
-      nanos = int((now - seconds) * 10**9)
-
-      # Create a TimeSeries object for the heartbeat metric
-      series = monitoring_v3.TimeSeries(
-          metric=metric_pb2.Metric(
-              type="compute.googleapis.com/workload_process/heartbeat",
-              labels={
-                  "local_rank": local_rank,
-                  "instance_id": _get_gcp_metadata(category="instance", attribute="id"),
-              },
-          ),
-          resource=monitored_resource_pb2.MonitoredResource(
-              type="compute.googleapis.com/WorkloadProcess",
-              labels={
-                  "project_id": self.project_id,
-                  "location": self.zone,
-                  "workload_id": self.workload_id,
-                  "replica_id": "0",
-                  "process_id": global_rank,
-              },
-          ),
-          points=[
-              monitoring_v3.Point(
-                  interval=monitoring_v3.TimeInterval(end_time={"seconds": seconds, "nanos": nanos}),
-                  value=monitoring_v3.TypedValue(bool_value=True),
-              ),
-          ],
-      )
-
-      # Send data to Google Cloud Monitoring
-      if self.client is not None:
-        self.client.create_time_series(
-            request={"name": f"projects/{self.project_id}", "time_series": [series]},
-            timeout=30,
-        )
-        max_logging.log("Heartbeat metric successfully sent to GCP.")
-    except GoogleAPIError as e:
-      max_logging.log(f"Failed to send heartbeat to GCP: {e}")
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      max_logging.log(f"Unexpected error while sending heartbeat to GCP: {e}")
+    pass
 
   def _report_performance(self, performance_metric):
     """Reports performance metric to GCP."""
-    if not _GCLOUD_AVAILABLE:
-      max_logging.log("[DECOUPLED NO-OP] performance metric skipped (google monitoring unavailable).")
-      return
-    try:
-      now = time.time()
-      seconds = int(now)
-      nanos = int((now - seconds) * 10**9)
-
-      # Create a TimeSeries object for the performance metric
-      series = monitoring_v3.TimeSeries(
-          metric=metric_pb2.Metric(
-              type="compute.googleapis.com/workload/performance",
-          ),
-          resource=monitored_resource_pb2.MonitoredResource(
-              type="compute.googleapis.com/Workload",
-              labels={
-                  "location": self.zone,
-                  "workload_id": self.workload_id,
-                  "replica_id": "0",
-              },
-          ),
-          points=[
-              monitoring_v3.Point(
-                  interval=monitoring_v3.TimeInterval(end_time={"seconds": seconds, "nanos": nanos}),
-                  value=monitoring_v3.TypedValue(double_value=performance_metric),
-              ),
-          ],
-      )
-
-      # Send data to Google Cloud Monitoring
-      if self.client is not None:
-        self.client.create_time_series(
-            request={"name": f"projects/{self.project_id}", "time_series": [series]},
-            timeout=30,
-        )
-        max_logging.log("Performance metric successfully sent to GCP.")
-    except GoogleAPIError as e:
-      max_logging.log(f"Failed to send performance to GCP: {e}")
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      max_logging.log(f"Unexpected error while sending performance to GCP: {e}")
+    pass
 
 
 def _get_gcp_metadata(category: str, attribute: str, timeout=5, retries=3):

@@ -118,27 +118,7 @@ def ring_ragged_sort(hidden_states_local, topk_indices_local, num_experts, topk,
 
     which is exactly a ragged gather reduce.
     """
-    topk_argsort_revert_indices, shard_output_start, shard_output_end, _ = res
-    g_x, _, _ = g_out
-    # Restrict to the [start, end) source range via a validity bitmask. The
-    # ragged kernel packs valid rows to the front of each row-partition and
-    # only iterates over the populated prefix, so we hand it the mask directly
-    # rather than materializing a (mostly-zero) dense buffer ourselves.
-    n = topk_argsort_revert_indices.shape[0]
-    pos = jnp.arange(n)
-    valid_rows_mask = (pos >= shard_output_start) & (pos < shard_output_end)
-    # The forward scatter-add over `token_indices_sorted` is equivalent to a
-    # gather-reduce: each input token has exactly `topk` contributions located
-    # at sorted positions `topk_argsort_revert_indices[t*topk:(t+1)*topk]`.
-    # `topk_weights` is set to ones because this op has no per-row weighting.
-    grad_hidden_states = ragged_gather_reduce(
-        g_x,
-        topk_argsort_revert_indices,
-        topk_weights=jnp.ones((n,), dtype=jnp.float32),
-        valid_rows_mask=valid_rows_mask,
-        reduce_group_size=topk,
-    )
-    return grad_hidden_states, None
+    pass
 
   _ring_ragged_sort.defvjp(_ring_ragged_sort_fwd, _ring_ragged_sort_bwd)
 
@@ -236,27 +216,7 @@ def ring_ragged_unsort(sorted_tokens_local, group_sizes_local, topk_argsort_reve
     range of ``j``.  The simpler equivalent: gather of g_hidden_states_local
     using the inverse permutation, masked.
     """
-    topk_argsort_revert_indices, shard_output_start, shard_output_end, sorted_tokens_local_shape = res
-    g_hidden_states_local = g_out
-    num_rows = sorted_tokens_local_shape[0]
-
-    # We want: g_sorted_tokens[j] = g_hidden_states_local[i] where revert[i]=j.
-    # Build the inverse permutation idx_inv such that idx_inv[j] = i.
-    idx_inv = jnp.argsort(topk_argsort_revert_indices)
-    # Because revert is a permutation, gathering with idx_inv reorders correctly.
-    grad_sorted_tokens = ragged_gather(
-        g_hidden_states_local,
-        idx_inv,
-        shard_output_start,
-        shard_output_end,
-    )
-    # Outside [start, end), positions must be zero — which the ragged_gather
-    # already guarantees because untouched output rows are uninitialized; we
-    # explicitly zero them.
-    pos = jnp.arange(num_rows)
-    valid = (pos >= shard_output_start) & (pos < shard_output_end)
-    grad_sorted_tokens = jnp.where(valid[:, None], grad_sorted_tokens, jnp.zeros_like(grad_sorted_tokens))
-    return grad_sorted_tokens, None, None
+    pass
 
   _ring_ragged_unsort.defvjp(_ring_ragged_unsort_fwd, _ring_ragged_unsort_bwd)
 
@@ -310,26 +270,6 @@ def a2a_ragged_sort(inputs, sort_indices, valid_end):
     res = (sort_indices, end, inputs.shape)
     return out, res
 
-  @jax.named_scope("local-ragged-gather-bwd")
-  def _a2a_ragged_sort_bwd(res, g_out):
-    sort_indices, end, _ = res
-    n = sort_indices.shape[0]
-    valid_rows_mask = jnp.arange(n) < end
-    # g_inputs[sort_indices[i]] += g_out[i], for i in [0, end). This is a
-    # ragged scatter-add, which we express as a gather-reduce along the inverse
-    # permutation: each input row j receives exactly one contribution from
-    # output row i where sort_indices[i] == j.
-    idx_inv = jnp.argsort(sort_indices)
-    grad_inputs = ragged_gather_reduce(
-        g_out,
-        idx_inv,
-        topk_weights=jnp.ones((n,), dtype=jnp.float32),
-        valid_rows_mask=valid_rows_mask[idx_inv],
-        reduce_group_size=1,
-    )
-    # custom_vjp must return one gradient per primal arg; valid_end is integer
-    # and non-differentiable, so we return None for it.
-    return grad_inputs, None, None
 
   _a2a_ragged_sort.defvjp(_a2a_ragged_sort_fwd, _a2a_ragged_sort_bwd)
   return _a2a_ragged_sort(inputs, sort_indices, valid_end)
@@ -380,20 +320,6 @@ def a2a_ragged_unsort(sorted_tokens, revert_indices, valid_end):
     res = (revert_indices, end, sorted_tokens.shape, start)
     return out, res
 
-  @jax.named_scope("local-ragged-scatter-bwd")
-  def _a2a_ragged_unsort_bwd(res, g_out):
-    revert_indices, end, sorted_tokens_shape, start = res
-    # g_sorted_tokens[revert_indices[i]] = g_out[i] for i in [0, end).
-    # Because revert_indices is a permutation, build the inverse and use
-    # ragged_gather to pull the per-row gradients to the right positions.
-    idx_inv = jnp.argsort(revert_indices)
-    grad_sorted = ragged_gather(g_out, idx_inv, start, end)
-    num_rows = sorted_tokens_shape[0]
-    pos = jnp.arange(num_rows)
-    valid = pos < end
-    grad_sorted = jnp.where(valid[:, None], grad_sorted, jnp.zeros_like(grad_sorted))
-
-    return grad_sorted, None, None
 
   _a2a_ragged_unsort.defvjp(_a2a_ragged_unsort_fwd, _a2a_ragged_unsort_bwd)
   return _a2a_ragged_unsort(sorted_tokens, revert_indices, valid_end)

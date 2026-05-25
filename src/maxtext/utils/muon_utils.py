@@ -109,10 +109,6 @@ def get_muon_weight_dimension_numbers(model, config, verbose=False):
   if isinstance(model, nnx.Module):
     _, abstract_param, _ = nnx.split(model, nnx.Param, ...)
 
-    def apply_transform_nnx(path: Tuple[jax.tree_util.KeyEntry, ...], leaf):
-      # Convert jax.tree_util.KeyEntry path to Tuple[str, ...]
-      path_strings = tuple(p.key for p in path if isinstance(p, jax.tree_util.DictKey))
-      return transform_logic(path_strings)
 
     # tree_map_with_path handles NNX's nested State (vs the Linen dict tree of
     # nn.LogicallyPartitioned leaves). The result is an nnx.State whose Param values hold the mdn result.
@@ -132,17 +128,6 @@ def get_muon_weight_dimension_numbers(model, config, verbose=False):
 def _print_structure_debug(abstract_param, muon_weight_dimension_numbers):
   """Prints the model structure and the resulting Muon config."""
 
-  def get_leaf_info(leaf):
-    # For linen:
-    # Access the shape from the inner ShapeDtypeStruct and names from the wrapper
-    # Return a new tree with the same structure containing only shapes/names
-    if isinstance(leaf, nn.LogicallyPartitioned):
-      return {"shape": leaf.value.shape, "names": leaf.names}
-    # For nnx:
-    # Only return the shape because it doesn't have a wrapper.
-    elif isinstance(leaf, jax.ShapeDtypeStruct):
-      return {"shape": leaf.shape}
-    return {"shape": "N/A"}
 
   info_tree = jax.tree_util.tree_map(
       get_leaf_info,

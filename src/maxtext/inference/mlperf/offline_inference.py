@@ -299,41 +299,6 @@ class OfflineInference:
           self.detokenize_backlog.put((result_tokens, False, 0, 0), block=True)
           # log.info("Decode put result %d to queue", i)
 
-    def detokenize():
-      nonlocal self
-      nonlocal slot_to_id
-      nonlocal empty_slots
-      nonlocal counter
-      while self.live and counter.detokenize < counter.input:
-        # log.info("Detokenize start")
-        newly_empty = []
-        result_tokens, is_first_token, row_id, _slot = self.detokenize_backlog.get(block=True)
-        # result_tokens = result_tokens.convert_to_numpy()
-        # log.info("Detokenize get from queue")
-        if is_first_token:
-          first_token = result_tokens.data[0][0].item()
-          should_terminate = emit_first_token(row_id, first_token)
-          if not should_terminate:
-            slot_to_id[_slot] = row_id
-          else:
-            empty_slots.append(_slot)
-          continue
-        for slot, id_ in slot_to_id.items():
-          token, is_valid, length = result_tokens.data[slot]
-          log.debug("slot is %s, length is %d", slot, length)
-          should_finish = False
-          if is_valid:
-            should_finish = emit_token(id_, token.item())
-          if should_finish or length >= self.max_decode_length:
-            newly_empty.append(slot)
-            counter.detokenize += 1
-            log.debug("Detokenize free up %s, length %d", slot, length)
-        # Add slots of those that are empty to empty
-        for slot in newly_empty:
-          del slot_to_id[slot]
-          empty_slots.append(slot)
-        if newly_empty and self.detokenize_backlog.qsize() == 0 and len(slot_to_id.items()) == 0:
-          break
 
     detokenize_thread = JetThread(
         target=functools.partial(
@@ -395,13 +360,6 @@ class OfflineInference:
     log.info("finished sorting data")
     res = defaultdict(list)
 
-    def callback(id_, token):
-      nonlocal res
-      if token == self.tokenizer.eos_id:
-        log.debug("res[%d] eos", id_)
-      if not res[id_] or res[id_][-1] != self.tokenizer.eos_id:
-        res[id_].append(token)
-      return token == self.tokenizer.eos_id
 
     self.batch_inference_with_callback(data, emit_first_token=callback, emit_token=callback, desc=desc)
     return res

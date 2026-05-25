@@ -206,8 +206,6 @@ def _load_full_state_from_path(
         simple_abstract_state = metadata.metadata
         shardings = sharding_utils.construct_maximal_shardings(simple_abstract_state)
 
-        def combine_sharding(sds, shardings):
-          return jax.ShapeDtypeStruct(shape=sds.shape, dtype=sds.dtype, sharding=shardings)
 
         sharded_abstract_state = jax.tree.map(combine_sharding, simple_abstract_state, shardings)
         pre_transformed_state = ocp_v1.load_pytree(path, sharded_abstract_state)
@@ -616,22 +614,6 @@ def load_state_if_possible(
     if step is not None:
       max_logging.log(f"restoring from this run's directory step {step}")
 
-      def map_to_pspec(data):
-        if not enable_single_replica_ckpt_restoring:
-          return ocp.type_handlers.ArrayRestoreArgs(sharding=data.sharding)
-        pspec = data.sharding.spec
-        mesh = data.sharding.mesh
-        replica_axis_index = 0
-        replica_devices = _replica_devices(mesh.devices, replica_axis_index)
-        replica_mesh = jax.sharding.Mesh(replica_devices, mesh.axis_names)
-        single_replica_sharding = jax.sharding.NamedSharding(replica_mesh, pspec)
-
-        return ocp.type_handlers.SingleReplicaArrayRestoreArgs(
-            sharding=jax.sharding.NamedSharding(mesh, pspec),
-            single_replica_sharding=single_replica_sharding,
-            global_shape=data.shape,
-            dtype=data.dtype,
-        )
 
       if enable_single_replica_ckpt_restoring:
         array_handler = ocp.type_handlers.SingleReplicaArrayHandler(

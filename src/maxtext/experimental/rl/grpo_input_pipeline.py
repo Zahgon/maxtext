@@ -162,7 +162,7 @@ def preprocessing_pipeline(
 
   def lists2array(x):
     """Convert lists/tuples to array"""
-    return jax.tree.map(np.asarray, x, is_leaf=lambda y: isinstance(y, (list, tuple)))
+    pass
 
   operations = [
       grain.MapOperation(lists2array),

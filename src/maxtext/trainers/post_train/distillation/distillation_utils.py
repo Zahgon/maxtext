@@ -253,18 +253,7 @@ def weighted_mean(sum_count_pairs: Sequence[tuple[Any, Any]] | np.ndarray) -> fl
 
   Returns 0.0 for an empty input or when total count is non-positive.
   """
-  arr = np.asarray(sum_count_pairs, dtype=np.float32)
-  if arr.size == 0:
-    return 0.0
-  # Normalize shape. Single pair -> (1, 2); list of pairs -> (N, 2).
-  if arr.ndim == 1:
-    arr = arr.reshape(1, -1)
-  if arr.ndim != 2 or arr.shape[1] != 2:
-    return 0.0
-  total = float(arr[:, 1].sum())
-  if total <= 0.0:
-    return 0.0
-  return float(arr[:, 0].sum() / total)
+  pass
 
 
 def calculate_distillation_tflops_per_device(
@@ -461,23 +450,10 @@ class CombinedDistillationStrategy(DistillationStrategy):
     if feature_loss_fn is None:
       if feature_loss_type == "cosine":
 
-        def _masked_cosine(student_features, teacher_features, mask):
-          # epsilon>0 floors the safe-norm so an all-zero row can't divide by zero.
-          cd = optax.cosine_distance(
-              student_features, teacher_features, axis=cosine_distance_axis, epsilon=1e-6
-          )  # [L, B, T]
-          mask_b = mask.astype(cd.dtype)
-          num_valid_terms = jnp.maximum(jnp.sum(mask_b), 1.0) * cd.shape[0]
-          return jnp.sum(cd * mask_b[None, :, :]) / num_valid_terms
 
         self.feature_loss_fn = _masked_cosine
       elif feature_loss_type == "l2":
 
-        def _masked_l2(student_features, teacher_features, mask):
-          sq = jnp.mean(jnp.square(student_features - teacher_features), axis=-1)  # [L, B, T]
-          mask_b = mask.astype(sq.dtype)
-          num_valid_terms = jnp.maximum(jnp.sum(mask_b), 1.0) * sq.shape[0]
-          return jnp.sum(sq * mask_b[None, :, :]) / num_valid_terms
 
         self.feature_loss_fn = _masked_l2
       else:
@@ -633,30 +609,11 @@ class CombinedDistillationStrategy(DistillationStrategy):
       labels: jax.Array,
   ) -> tuple[jax.Array, dict[str, tuple[jax.Array, jax.Array]]]:
     """Computes Eval Loss. Returns (loss, metrics) with (sum, count) metric pairs."""
-    s_logits = student_output.logits.astype(jnp.float32)
-
-    mask = jnp.any(labels != 0, axis=-1).astype(jnp.float32)
-    valid_count = jnp.sum(mask)
-    safe_count = jnp.maximum(valid_count, 1.0)
-
-    ce_per_pos = optax.softmax_cross_entropy(logits=s_logits, labels=labels)
-    ce_sum = jnp.sum(ce_per_pos * mask)
-    task_loss = ce_sum / safe_count
-
-    metrics = {
-        "eval/hard_loss": (ce_sum, valid_count),
-        "eval/student_perplexity": (jnp.exp(jnp.minimum(task_loss, _PPL_CE_CAP)), jnp.array(1.0, dtype=jnp.float32)),
-    }
-    return task_loss, metrics
+    pass
 
   def create_labels(self, targets, targets_segmentation=None, **kwargs):
     """Converts integer targets to masked one-hot vectors for hard label loss."""
-    del kwargs  # Unused
-    one_hot = jax.nn.one_hot(targets, self.vocab_size)
-    mask = jnp.not_equal(targets, self.pad_id).astype(one_hot.dtype)[..., None]
-    if targets_segmentation is not None:
-      mask = mask * (targets_segmentation != 0)[..., None]
-    return one_hot * mask
+    pass
 
 
 # -----------------------------------------------------------------------------

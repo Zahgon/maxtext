@@ -91,8 +91,6 @@ def get_quantized_param_paths(aqt_params: Any, params: Any) -> set[tuple[DictKey
   Identifies the set of paths in the original params tree that have been quantized.
   """
 
-  def is_qtensor(x):
-    return isinstance(x, aqt_tensor.QTensor)
 
   aqt_param_flat, _ = jax.tree_util.tree_flatten_with_path(aqt_params, is_leaf=is_qtensor)
   if not aqt_param_flat:
@@ -121,8 +119,6 @@ def remove_quantized_params(params: Any, aqt_vars: Any) -> Any:
   if not quantized_param_path_set:
     return params
 
-  def _map_fn(path, value):
-    return {} if tuple(path) in quantized_param_path_set else value
 
   return jax.tree_util.tree_map_with_path(_map_fn, params)
 
@@ -294,19 +290,6 @@ class LayerwiseQuantization:
       # True if the layer name is part of the path
       return any(isinstance(key, jax.tree_util.DictKey) and key.key == layer for key in path)
 
-    def _map_fn(path, value):
-      if not _should_keep(path, value):
-        return IGNORE
-      if isinstance(value, jax.ShapeDtypeStruct):
-        zeros_array = jnp.zeros(value.shape, value.dtype)
-        if value.sharding is not None:
-          try:
-            return jax.device_put(zeros_array, value.sharding)
-          except Exception as e:  # pylint: disable=broad-except
-            max_logging.log(f"Error applying sharding for path {path}: {e}")
-            return zeros_array
-        return zeros_array
-      return value
 
     return jax.tree_util.tree_map_with_path(_map_fn, abstract_unboxed_params)
 

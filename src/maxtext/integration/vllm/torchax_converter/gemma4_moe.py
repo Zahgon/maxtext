@@ -198,33 +198,7 @@ class Gemma4MaxTextToVLLMConverter(BaseMaxTextToVLLMConverter):
       norms:        (D,)             → (D,)               [identity]
     """
 
-    @jax.jit
-    def _pack_local(attn):
-      q = attn["query"]["kernel"]
-      k = attn["key"]["kernel"]
-      v = attn["value"]["kernel"]
-      return Gemma4MaxTextToVLLMConverter._pack_attn(
-          q,
-          k,
-          v,
-          attn["out"]["kernel"],
-          attn["query_norm"]["scale"],
-          attn["key_norm"]["scale"],
-      )
 
-    @jax.jit
-    def _pack_global(attn):
-      # Global: no 'value'; key used as both K and V (shared KV projection).
-      q = attn["query"]["kernel"]
-      k = attn["key"]["kernel"]
-      return Gemma4MaxTextToVLLMConverter._pack_attn(
-          q,
-          k,
-          k,
-          attn["out"]["kernel"],
-          attn["query_norm"]["scale"],
-          attn["key_norm"]["scale"],
-      )
 
     for slot in range(self.NUM_SLOTS):
       is_global = slot == self.NUM_SLOTS - 1

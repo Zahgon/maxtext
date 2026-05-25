@@ -87,60 +87,7 @@ class MaxTextPeftTrainer(peft_trainer.PeftTrainer):
 
   def create_train_step_fn(self):
     """Creates a train step using jax.value_and_grad with explicit NNX split/merge."""
-    loss_fn_ref = self.loss_fn
-    has_aux = self._has_aux
-    gen_fn = self.gen_model_input_fn
-    is_lora_enabled = self._lora_enabled
-    wrt = nnx.LoRAParam if is_lora_enabled else nnx.Param
-
-    # Detect whether Tunix's train() expects (loss, aux, grad_norm) or just
-    # (loss, aux) by inspecting the source of PeftTrainer._train_step.
-    tunix_expects_grad_norm = False
-    try:
-      source = inspect.getsource(peft_trainer.PeftTrainer._train_step)  # pylint: disable=protected-access
-      tunix_expects_grad_norm = "grad_norm" in source
-    except (TypeError, OSError):
-      pass
-
-    # Capture the graphdef once outside of JIT so that split/merge inside
-    # jax.value_and_grad can use a stable (non-traced) structural descriptor.
-    graphdef, _, _ = nnx.split(self.model, wrt, ...)
-
-    def train_step(model: nnx.Module, optimizer: nnx.Optimizer, inputs: Any):
-      inputs = gen_fn(inputs)
-
-      # Split model into differentiable params and non-differentiable rest.
-      # Using jax.value_and_grad (not nnx.value_and_grad) avoids nesting NNX
-      # transforms inside nnx.jit, which would corrupt outer_index tracking.
-      _, diff_params, rest = nnx.split(model, wrt, ...)
-
-      def loss_wrapper(diff_params, rest, **inputs_kw):
-        local_model = nnx.merge(graphdef, diff_params, rest, copy=True)
-        out = loss_fn_ref(local_model, **inputs_kw)
-        # Capture updated non-param state (e.g. RNG counters) from local_model.
-        _, _, new_rest = nnx.split(local_model, wrt, ...)
-        if has_aux:
-          loss, aux = out
-          return loss, (aux, new_rest)
-        else:
-          return out, (None, new_rest)
-
-      grad_fn = jax.value_and_grad(loss_wrapper, argnums=0, has_aux=True)
-      (out_val, (aux, new_rest)), grads = grad_fn(diff_params, rest, **inputs)
-
-      # Propagate updated non-param state (RNG counters, etc.) back to model.
-      nnx.update(model, new_rest)
-
-      # Apply optimizer update. grads has the same nnx.State(wrt) structure
-      # as diff_params, which is compatible with optimizer.update.
-      optimizer.update(model, grads)
-
-      aux_out = aux if has_aux else None
-      if tunix_expects_grad_norm:
-        return out_val, aux_out, optax.global_norm(grads)
-      return out_val, aux_out
-
-    return train_step
+    pass
 
 
 def get_tunix_config(mt_config):
@@ -202,24 +149,6 @@ def use_maxtext_loss_function(trainer, mt_config):
     The trainer configured with the MaxText loss function.
   """
 
-  def loss_func(
-      model,
-      inputs,
-      inputs_position,
-      inputs_segmentation,
-      targets,
-      targets_position,
-      targets_segmentation,
-  ):
-    data = {
-        "inputs": inputs,
-        "inputs_position": inputs_position,
-        "inputs_segmentation": inputs_segmentation,
-        "targets": targets,
-        "targets_position": targets_position,
-        "targets_segmentation": targets_segmentation,
-    }
-    return loss_fn(model, mt_config, data, dropout_rng=None, params=None, is_train=True)
 
   trainer = trainer.with_loss_fn(loss_func, has_aux=True)
   return trainer

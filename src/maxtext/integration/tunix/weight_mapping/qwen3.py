@@ -35,8 +35,7 @@ class QWEN3_VLLM_MAPPING:
     Returns:
       An empty dictionary, as no hook functions are needed for this mapping.
     """
-
-    return {}
+    pass
 
   @staticmethod
   def to_hf_transpose_keys():
@@ -45,7 +44,7 @@ class QWEN3_VLLM_MAPPING:
     Returns:
       An empty dictionary, as no keys require transposition for this mapping.
     """
-    return {}
+    pass
 
   @staticmethod
   def lora_to_hf_mappings():
@@ -54,7 +53,7 @@ class QWEN3_VLLM_MAPPING:
     Returns:
       None, as LoRA mappings are not defined for this model.
     """
-    return None
+    pass
 
   @staticmethod
   def to_hf_mapping():
@@ -64,68 +63,4 @@ class QWEN3_VLLM_MAPPING:
     param name & sharding in one dictionary.
     This is subject to change in the future where we can decouple the two.
     """
-    return {
-        # Token embeddings - shard vocab dimension
-        "base.token_embedder.embedding": (
-            "model.embed_tokens.weight",
-            ("model", None),
-        ),
-        # Final layer norm - no sharding needed
-        "base.decoder.decoder_norm.scale": (
-            "model.norm.weight",
-            (None,),
-        ),
-        # LM head (logits projection) - shard vocab dimension
-        "base.decoder.logits_dense.kernel": (
-            "model.lm_head",
-            (None, "model"),
-        ),
-        # Layer-specific mappings (scanned -> unscanned)
-        # MLP components - shard hidden dimensions
-        "base.decoder.layers.mlp.wi_0.kernel": (
-            "model.layers.*.mlp.gate_proj.weight",
-            (None, "layer", "model"),
-        ),
-        "base.decoder.layers.mlp.wi_1.kernel": (
-            "model.layers.*.mlp.up_proj.weight",
-            (None, "layer", "model"),
-        ),
-        "base.decoder.layers.mlp.wo.kernel": (
-            "model.layers.*.mlp.down_proj.weight",
-            ("model", "layer", None),
-        ),
-        # Layer norms - no sharding needed
-        "base.decoder.layers.pre_self_attention_layer_norm.scale": (
-            "model.layers.*.input_layernorm.weight",
-            (None, "layer"),
-        ),
-        "base.decoder.layers.post_self_attention_layer_norm.scale": (
-            "model.layers.*.post_attention_layernorm.weight",
-            (None, "layer"),
-        ),
-        # Attention components - shard head dimensions
-        "base.decoder.layers.self_attention.query.kernel": (
-            "model.layers.*.self_attn.q_proj.weight",
-            (None, "layer", "model", None),
-        ),
-        "base.decoder.layers.self_attention.key.kernel": (
-            "model.layers.*.self_attn.k_proj.weight",
-            (None, "layer", "model", None),
-        ),
-        "base.decoder.layers.self_attention.value.kernel": (
-            "model.layers.*.self_attn.v_proj.weight",
-            (None, "layer", "model", None),
-        ),
-        "base.decoder.layers.self_attention.out.kernel": (
-            "model.layers.*.self_attn.o_proj.weight",
-            ("model", "layer", None, None),
-        ),
-        "base.decoder.layers.self_attention.query_norm.scale": (
-            "model.layers.*.self_attn.q_norm.weight",
-            (None, "layer"),
-        ),
-        "base.decoder.layers.self_attention.key_norm.scale": (
-            "model.layers.*.self_attn.k_norm.weight",
-            (None, "layer"),
-        ),
-    }
+    pass

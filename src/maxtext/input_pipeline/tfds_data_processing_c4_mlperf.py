@@ -77,9 +77,7 @@ def rekey(ds, key_map=None):
     Returns:
       A preprocessed example with the format listed above.
     """
-    if key_map:
-      return {new_key: x[old_key] for new_key, old_key in key_map.items() if old_key}
-    return x
+    pass
 
   return ds.map(functools.partial(_rekey, key_map=key_map), num_parallel_calls=AUTOTUNE)
 
@@ -103,11 +101,6 @@ def reduce_concat_tokens(
   dataset = dataset.map(lambda x: {feature_key: x[feature_key]}, num_parallel_calls=AUTOTUNE)
   dataset = dataset.padded_batch(batch_size, padded_shapes={feature_key: [-1]})
 
-  def _my_fn(x):
-    tokens = tf.reshape(x[feature_key], [-1])
-    # strip padding
-    tokens = tf.boolean_mask(tokens, tf.cast(tokens, tf.bool))
-    return {feature_key: tokens}
 
   return dataset.map(_my_fn, num_parallel_calls=AUTOTUNE)
 
@@ -132,19 +125,8 @@ def split_tokens(
 
   def _split_tokens(x):
     """Split one token sequence into multiple multiple."""
-    tokens = x[feature_key]
-    n_tokens = tf.size(tokens)
-    length = max_tokens_per_segment
+    pass
 
-    # Pad to a multiple of length, then use tf.reshape to split up the tokens
-    # into num_segments segments each of the given length.
-    num_segments = tf.cast(tf.math.ceil(tf.cast(n_tokens, tf.float32) / tf.cast(length, tf.float32)), tf.int32)
-    padding = num_segments * length - tf.size(tokens)
-    tokens = tf.pad(tokens, [[0, padding]])
-    return tf.reshape(tokens, [-1, length])
-
-  def _strip_padding(x):
-    return {feature_key: tf.boolean_mask(x, tf.cast(x, tf.bool))}
 
   # Filter empty examples.
   dataset = dataset.filter(lambda x: tf.not_equal(tf.size(x[feature_key]), 0))
@@ -191,9 +173,6 @@ def _pad_to_batch_size(
   )
 
   # Repeat a random example to make the last batch full.
-  def _add_pad(x):
-    x["targets_segmentation"] *= 0
-    return x
 
   pad_ds = ds.take(1).map(_add_pad).repeat(pad_num)
   return ds.concatenate(pad_ds)

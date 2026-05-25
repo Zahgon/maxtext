@@ -140,22 +140,7 @@ def gpt3_layer_norm(
     parameter_memory_host_offload: Determines whether to offload params to host
     name: name passed to the ToLinen Module
   """
-
-  module = nnx_wrappers.to_linen(
-      Gpt3LayerNorm,
-      num_features=num_features,
-      epsilon=epsilon,
-      dtype=dtype,
-      weight_dtype=weight_dtype,
-      kernel_axes=kernel_axes,
-      scale_init=scale_init,
-      use_bias=use_bias,
-      reductions_in_fp32=reductions_in_fp32,
-      parameter_memory_host_offload=parameter_memory_host_offload,
-      name=name,
-      metadata_fn=initializers.variable_to_logically_partitioned,
-  )
-  return module
+  pass
 
 
 # -----------------------------------------
@@ -294,16 +279,11 @@ class Gpt3MultiHeadAttention(nnx.Module):
 
   def qkv_projection(self, projection_layer: Any, inputs: Array):
     """Fused QKV projection"""
-    qkv_proj = projection_layer(inputs)
-
-    qkv_proj = checkpoint_name(qkv_proj, "qkv_proj")
-    query, key, value = qkv_proj[:, :, 0, ...], qkv_proj[:, :, 1, ...], qkv_proj[:, :, 2, ...]
-    return query, key, value
+    pass
 
   def projection(self, projection_layer: Any, inputs: Array) -> Array:
     """individual projection for one of q, k and v."""
-    proj = projection_layer(inputs)
-    return proj
+    pass
 
   def init_kv_caches(self, inputs_kv_shape: tuple[int, ...]):
     batch_size, _, _ = inputs_kv_shape
@@ -328,16 +308,6 @@ class Gpt3MultiHeadAttention(nnx.Module):
         rngs=self.rngs,
     )
 
-  def update_kv_caches(self, key, value, decoder_segment_ids, model_mode, previous_chunk):
-    prefill_kv_cache, ar_kv_cache = self.KVCache_0(
-        key=key,
-        value=value,
-        decoder_segment_ids=decoder_segment_ids,
-        model_mode=model_mode,
-        use_ragged_attention=self.use_ragged_attention,
-        previous_chunk=previous_chunk,
-    )
-    return [prefill_kv_cache, ar_kv_cache]
 
   def __call__(
       self,

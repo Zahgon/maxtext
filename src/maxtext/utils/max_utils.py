@@ -98,15 +98,9 @@ def with_memory_kind(t, memory_kind):
 
 def cast_dtype_from_to(nest, src, dst):
   """All items in nest with dtype src are casted to dtype dst."""
-  return jax.tree_util.tree_map(lambda t: t.astype(dst) if t.dtype == src else t, nest)
+  pass
 
 
-def find_nans_and_infs(pytree):
-  def finder(x):
-    return jnp.any(jnp.isinf(x) | jnp.isnan(x))
-
-  bad_pytree = jax.tree_util.tree_map(finder, pytree)
-  return jax.tree_util.tree_flatten(bad_pytree)
 
 
 def l2norm_pytree(x):
@@ -132,14 +126,7 @@ def device_space():
 
 def calculate_total_params_per_chip(params):
   """Calculate total params per chip."""
-
-  def calculate_leaf_params_per_chip(arr):
-    shard = arr.addressable_shards[0]
-    return np.prod(shard.data.shape)
-
-  params_sizes_per_chip = jax.tree_util.tree_map(calculate_leaf_params_per_chip, params)
-  total_parameters_per_chip = jax.tree_util.tree_reduce(lambda x, y: x + y, params_sizes_per_chip)
-  return total_parameters_per_chip
+  pass
 
 
 def _bytes_of(x):
@@ -147,24 +134,7 @@ def _bytes_of(x):
   Handles concrete arrays (NumPy/JAX), abstract shapes, scalars, and None.
   Unknown types default to 0.
   """
-  # Abstract JAX values: compute bytes from shape × dtype size.
-  if isinstance(x, jax.ShapeDtypeStruct):
-    # jnp.dtype() normalizes to a consistent dtype object (e.g., handles bfloat16)
-    return int(np.prod(x.shape)) * int(jnp.dtype(x.dtype).itemsize)
-
-  # Concrete arrays (NumPy, JAX): rely on their native nbytes property.
-  if hasattr(x, "nbytes"):
-    return int(x.nbytes)
-
-  # Python scalars (int, float, bool): convert to a NumPy array to measure size.
-  if isinstance(x, (int, float, bool)):
-    return int(np.array(x).nbytes)
-
-  # None or unsupported leaf types: count as zero bytes.
-  if x is not None:
-    max_logging.log(f"Unsupported leaf type in calculate_bytes_from_pytree: {type(x)}")
-
-  return 0
+  pass
 
 
 def calculate_bytes_from_pytree(params):
@@ -654,24 +624,7 @@ def _cross_entropy_with_logits_fwd(logits: jnp.ndarray, targets: jnp.ndarray, z_
     ],
 ]:
   """Forward-mode of `cross_entropy_with_logits`."""
-  max_logit = logits.max(axis=-1, keepdims=True)
-  shifted = logits - max_logit
-  exp_shifted = jnp.exp(shifted)
-  sum_exp = jnp.sum(exp_shifted, axis=-1, keepdims=True)
-  log_softmax = shifted - jnp.log(sum_exp)
-  loss = -jnp.sum(targets * log_softmax, axis=-1)
-  # Add auxiliary z-loss term.
-  log_z = jnp.squeeze(jnp.log(sum_exp) + max_logit, axis=-1)
-  total_z_loss = z_loss * jax.lax.square(log_z)
-  loss += total_z_loss
-  return (loss, total_z_loss), (
-      logits,
-      targets,
-      z_loss,
-      exp_shifted,
-      sum_exp,  # pytype: disable=bad-return-type  #jax-ndarray
-      log_z,
-  )
+  pass
 
 
 def _cross_entropy_with_logits_bwd(
@@ -686,32 +639,14 @@ def _cross_entropy_with_logits_bwd(
     g: tuple[jnp.ndarray, jnp.ndarray],
 ) -> tuple[jnp.ndarray, None, None]:
   """Backward-mode of `cross_entropy_with_logits`."""
-  g = g[0]  # Ignore z_loss component as that is only used for logging.
-  logits, targets, z_loss, exp_shifted, sum_exp, log_z = res
-  # z-loss term adds the (2 * z_loss * log_z) factor.
-  deriv = jnp.expand_dims(1 + 2 * z_loss * log_z, -1) * exp_shifted / sum_exp - targets
-  g_logits = jnp.expand_dims(g, axis=-1) * deriv
-
-  return (
-      jnp.asarray(g_logits, logits.dtype),
-      None,  # we don't need gradients on targets
-      None,  # we don't need gradients on z_loss
-  )  # sets z-loss coeff gradient to 0
+  pass
 
 
 cross_entropy_with_logits.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 
-def print_pytree_shape(print_str, ptree):
-  print("\n")
-  print(print_str)
-  print(jax.tree_util.tree_map(lambda x: x.shape, ptree))
 
 
-def print_model_vars(print_str, model_vars):
-  for k in model_vars:
-    print(f"{print_str} key{k}:")
-    print(f"\t {model_vars[k]}")
 
 
 def get_project():
@@ -730,13 +665,6 @@ def get_project():
     return None
 
 
-def delete_pytree(p):
-  def delete_leaf(leaf):
-    if isinstance(leaf, jax.Array):
-      leaf.delete()
-    del leaf
-
-  jax.tree_util.tree_map(delete_leaf, p)
 
 
 def summarize_pytree_data(params, name="Params", raw=False):
@@ -935,52 +863,7 @@ def reorder_causal_load_balanced(batch, cp_size, reorder_strategy, hardware="tpu
 
   See: https://github.com/NVIDIA/TransformerEngine/blob/main/transformer_engine/jax/attention.py
   """
-  # pylint: disable=import-outside-toplevel
-  from maxtext.common.common_types import ReorderStrategy
-
-  _reorder_keys = {
-      "inputs",
-      "targets",
-      "inputs_position",
-      "targets_position",
-      "inputs_segmentation",
-      "targets_segmentation",
-  }
-
-  if hardware in ("gpu", "gpu_multiprocess"):
-    from transformer_engine.jax.attention import ReorderStrategy as TE_ReorderStrategy
-    from transformer_engine.jax.attention import reorder_causal_load_balancing
-
-    reorder_strategy_map = {
-        ReorderStrategy.DUAL_CHUNK_SWAP: TE_ReorderStrategy.DualChunkSwap,
-        ReorderStrategy.STRIPED: TE_ReorderStrategy.Striped,
-    }
-
-    return {
-        key: reorder_causal_load_balancing(
-            value,
-            reorder_strategy_map[reorder_strategy],
-            cp_size=cp_size,
-            seq_dim=1,
-        )
-        if key in _reorder_keys
-        else value
-        for key, value in batch.items()
-    }
-  else:
-    if reorder_strategy == ReorderStrategy.STRIPED:
-      raise ValueError(
-          f"STRIPED reorder strategy requires Transformer Engine and is only supported on GPU, got hardware={hardware!r}."
-      )
-    return {
-        key: reorder_sequence(
-            value,
-            cp_size=cp_size,
-        )
-        if key in _reorder_keys
-        else value
-        for key, value in batch.items()
-    }
+  pass
 
 
 @staticmethod
@@ -1067,8 +950,7 @@ def unscan_train_state_params(params, sharding, mesh, scan_axis, layer_groups):
   # Helper function to remove the scan axis from a PartitionSpec
   def strip_scan_axis(pspec: P) -> P:
     """Removes the element at `scan_axis` from a PartitionSpec tuple."""
-    spec_tuple = tuple(pspec)
-    return P(*(spec_tuple[:scan_axis] + spec_tuple[scan_axis + 1 :]))
+    pass
 
   for layer_name, num_layers in layer_groups:
     scanned_layers = decoder[layer_name]
@@ -1107,29 +989,7 @@ def rescan_train_state_params(params, source_shardings, scan_axis, layer_groups)
     layer_groups: list of (layer_name, num_layers)
     mesh: jax.sharding.Mesh for out_shardings
   """
-  decoder = params["params"]["decoder"]
-  sharding = source_shardings["params"]["decoder"]
-
-  for layer_name, num_layers in layer_groups:
-
-    def stack_layers(*layers):
-      return jax.tree_util.tree_map(lambda *xs: jnp.stack(xs, axis=scan_axis), *layers)
-
-    # Create a wrapper that allows pjit + donation
-    compiled_stack = jax.jit(
-        stack_layers,
-        out_shardings=sharding[layer_name],
-        # donate_argnums=tuple(range(num_layers)),
-    )
-
-    # Collect per-layer entries for stacking
-    layer_list = [decoder.pop(f"{layer_name}_{i}") for i in range(num_layers)]
-
-    # Stack them with donation
-    scanned = compiled_stack(*layer_list)
-
-    # Store result and clear temporary memory
-    decoder[layer_name] = scanned
+  pass
 
 
 def get_batch_seq_len_for_mode(config, model_mode):

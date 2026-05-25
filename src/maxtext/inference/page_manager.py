@@ -157,13 +157,6 @@ def _release_pages_for_group(
   current_page_map = page_state.page_map
   num_valid_pages = page_state.num_pages_used[page_group_id]
 
-  def release_page(i: int, status: PagesInt1d) -> PagesInt1d:
-    is_valid = i < num_valid_pages
-    page_idx = current_page_map[page_group_id, i]
-    # Only release if index 'i' points to a valid allocated page
-    should_release = jnp.logical_and(is_valid, page_idx > 0)
-
-    return jax.lax.cond(should_release, lambda s: s.at[page_idx].set(0), lambda s: s, status)
 
   new_page_status = jax.lax.fori_loop(0, max_pages_per_group, release_page, current_page_status)
 
@@ -225,53 +218,7 @@ def _reserve_pages_for_group(
 
   def allocate_and_update_state(initial_state_tuple: tuple[PagesInt1d, GroupsPagesInt2d, GroupsInt1d]) -> PageState:
     """Allocates pages iteratively if resources are sufficient."""
-    initial_status, initial_map, initial_num_used = initial_state_tuple
-
-    def allocate_one_page(
-        page_idx_in_group: ScalarInt, loop_state_tuple: tuple[PagesInt1d, GroupsPagesInt2d, GroupsInt1d]
-    ) -> tuple[PagesInt1d, GroupsPagesInt2d, GroupsInt1d]:
-      """Allocates a single page within the fori_loop."""
-      current_loop_status, current_loop_map, current_loop_num_used = loop_state_tuple
-      next_free_page_global = _find_next_free_page_index(current_loop_status)
-      page_allocated = jax.lax.ge(next_free_page_global, 0)
-
-      new_loop_status = jax.lax.cond(
-          page_allocated,
-          lambda s: s.at[next_free_page_global].set(1),
-          lambda s: s,
-          current_loop_status,
-      )
-      new_loop_map = jax.lax.cond(
-          page_allocated,
-          lambda m: m.at[page_group_id, page_idx_in_group].set(next_free_page_global),
-          lambda m: m,
-          current_loop_map,
-      )
-      new_loop_num_used = jax.lax.cond(
-          page_allocated,
-          lambda n: n.at[page_group_id].add(1),
-          lambda n: n,
-          current_loop_num_used,
-      )
-      return new_loop_status, new_loop_map, new_loop_num_used
-
-    final_page_status, final_page_map, final_num_pages_used = jax.lax.fori_loop(
-        0,
-        num_pages_needed,
-        allocate_one_page,
-        (initial_status, initial_map, initial_num_used),
-    )
-    active_page_global_index = final_page_map[page_group_id, num_pages_needed - 1]
-
-    return released_state.replace(
-        page_status=final_page_status,
-        page_map=final_page_map,
-        num_pages_used=final_num_pages_used,
-        sequence_lengths=released_state.sequence_lengths.at[page_group_id].set(true_length),
-        active_page=released_state.active_page.at[page_group_id].set(active_page_global_index),
-        has_active_page=released_state.has_active_page.at[page_group_id].set(True),
-        active_page_position=released_state.active_page_position.at[page_group_id].set(next_write_position),
-    )
+    pass
 
     # Conditionally perform allocation or return the released state
 
@@ -346,33 +293,7 @@ def _update_decode_pages_global(
 
   def allocate_for_group_if_needed(group_idx: ScalarInt, current_state: PageState) -> PageState:
     """Inner function for fori_loop to conditionally allocate a page."""
-    current_status = current_state.page_status
-    current_map = current_state.page_map
-    current_num_used = current_state.num_pages_used
-    current_active_page = current_state.active_page
-
-    needs_alloc = needs_allocation_mask[group_idx]
-    next_free_page_global = _find_next_free_page_index(current_status)
-    can_allocate = jnp.logical_and(needs_alloc, next_free_page_global >= 0)
-
-    new_status = jax.lax.cond(can_allocate, lambda s: s.at[next_free_page_global].set(1), lambda s: s, current_status)
-
-    page_map_index = current_num_used[group_idx]
-    new_map = jax.lax.cond(
-        can_allocate, lambda m: m.at[group_idx, page_map_index].set(next_free_page_global), lambda m: m, current_map
-    )
-    new_num_used = jax.lax.cond(can_allocate, lambda n: n.at[group_idx].add(1), lambda n: n, current_num_used)
-    new_active_page = jax.lax.cond(
-        can_allocate, lambda a: a.at[group_idx].set(next_free_page_global), lambda a: a, current_active_page
-    )
-
-    # Reconstruct state for loop carry/return
-    return current_state.replace(
-        page_status=new_status,
-        page_map=new_map,
-        num_pages_used=new_num_used,
-        active_page=new_active_page,
-    )
+    pass
 
     # Initialize loop state with pre-calculated lengths and positions
 

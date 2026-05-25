@@ -191,17 +191,8 @@ class DeepSeekGenericLayer(nnx.Module):
         rules=self.config.logical_axis_rules,
     )
 
-  def dropout_op(self, x, deterministic):
-    dropout = self.dropout(x, deterministic=deterministic)
-    return self.with_logical_constraint(dropout)
 
-  def pre_attention_norm_op(self, x):
-    pre_attention_norm = self.pre_self_attention_layer_norm(x)
-    return self.with_logical_constraint(pre_attention_norm)
 
-  def post_attention_norm_op(self, x):
-    post_attention_norm = self.post_self_attention_layer_norm(x)
-    return self.with_logical_constraint(post_attention_norm)
 
   def attention_op(
       self,
@@ -231,16 +222,12 @@ class DeepSeekGenericLayer(nnx.Module):
   @property
   def logical_axis_names(self):
     """Generate logical names for activations generally."""
-    length_name = "prefill_activation_norm_length" if self.model_mode == MODEL_MODE_PREFILL else "activation_norm_length"
-    axis_names = ["activation_batch", length_name, "activation_embed"]
-    return axis_names
+    pass
 
   @property
   def mlp_logical_axis_names(self):
     """Generate logical names for activations in MLP."""
-    length_name = "prefill_activation_norm_length" if self.model_mode == MODEL_MODE_PREFILL else "activation_norm_length"
-    axis_names = ["activation_batch", length_name, "activation_mlp"]
-    return axis_names
+    pass
 
   def post_process(self, layer_output, load_balance_loss, moe_bias_updates, kv_cache=None):
     """postprocessing."""
@@ -275,41 +262,8 @@ class DeepSeekGenericLayer(nnx.Module):
       slot: None | int = None,
   ):
     """self-attention with normalization"""
-    if self.is_mhc_enabled:
-      intermediate_inputs, _ = self.mhc_attention(
-          self.pre_attention_norm_op,
-          self.self_attention,
-          x=inputs,
-          mhc_type=HyperConnectionType.ATTENTION,
-          decoder_segment_ids=decoder_segment_ids,
-          inputs_positions=decoder_positions,
-          deterministic=deterministic,
-          model_mode=self.model_mode,
-          out_sharding=self.out_sharding,
-          previous_chunk=previous_chunk,
-          page_state=page_state,
-          slot=slot,
-      )
-    else:
-      lnx = self.pre_attention_norm_op(inputs)
-      attention_lnx = self.attention_op(
-          lnx,
-          decoder_segment_ids,
-          decoder_positions,
-          deterministic,
-          previous_chunk,
-          page_state,
-          slot,
-      )
-      intermediate_inputs = inputs + attention_lnx
-    # Normalization
-    hidden_states = self.post_attention_norm_op(intermediate_inputs)
-    return hidden_states, intermediate_inputs
+    pass
 
-  def engram_op(self, x, decoder_input_tokens):
-    normed_x = self.engram_layer_norm(x)
-    hash_ids = self.ngram_hash_mapping(decoder_input_tokens)[self.layer_idx]
-    return self.engram(normed_x, hash_ids)
 
 
 class DeepSeekDenseLayer(DeepSeekGenericLayer):
@@ -339,9 +293,6 @@ class DeepSeekDenseLayer(DeepSeekGenericLayer):
         rngs=self.rngs,
     )
 
-  def mlp_op(self, x, deterministic):
-    mlp = self.mlp(x, deterministic, intermediate_sharding=self.mlp_intermediate_sharding, out_sharding=self.out_sharding)
-    return self.with_logical_constraint(mlp)
 
   def __call__(
       self,
@@ -526,16 +477,6 @@ class DeepSeekMoELayer(DeepSeekGenericLayer):
       )(inputs)
       yarn_freqs = deepseek_batchsplit.split(yarn_freqs, self.config.batch_split_factor)
 
-      def extract_fn(x):
-        if isinstance(x, nnx.variablelib.Variable):
-          return maybe_shard_with_logical(
-              x.value,
-              x.sharding_names,
-              self.mesh,
-              shard_mode=self.config.shard_mode,
-              rules=self.config.logical_axis_rules,
-          )
-        return x
 
       weights = deepseek_batchsplit.fetch_weights(
           nnx.to_pure_dict(nnx.state(self, nnx.Param), extract_fn), self.config.dtype
@@ -608,11 +549,6 @@ class DeepSeekMoELayer(DeepSeekGenericLayer):
 
     return self.post_process(layer_output, load_balance_loss, moe_bias_updates, kv_cache)
 
-  def mlp_op(self, x, deterministic, *args, **kwargs):
-    mlp_lnx, load_balance_loss, moe_bias_updates = self.DeepSeekMoeBlock_0(
-        x, intermediate_sharding=self.mlp_intermediate_sharding, out_sharding=self.out_sharding
-    )
-    return self.with_logical_constraint(mlp_lnx), load_balance_loss, moe_bias_updates
 
 
 DeepSeekMoELayerToLinen = nnx_wrappers.to_linen_class(

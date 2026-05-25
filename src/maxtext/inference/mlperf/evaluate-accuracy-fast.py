@@ -43,8 +43,7 @@ def split_data(preds: list[str], refs: list[str], num_chunks: int) -> list[tuple
 
 def compute_rouge_chunk(chunk: tuple[list[str], list[str]], metric) -> dict:
   """Compute ROUGE scores for a chunk of data"""
-  preds, refs = chunk
-  return metric.compute(predictions=preds, references=refs, use_stemmer=True, use_aggregator=False)
+  pass
 
 
 def aggregate_rouge_scores(chunk_results: list[dict]) -> dict:
@@ -93,29 +92,7 @@ def get_groundtruth(processed_dataset_file):
 
 def process_batch(batch, tokenizer, eval_dtype):
   """Process a batch of predictions"""
-  preds_token_ids = []
-  seen = set()
-  gen_tok_len = 0
-  target_indices = []
-
-  for pred in batch:
-    qsl_idx = pred["qsl_idx"]
-    if qsl_idx in seen:
-      continue
-
-    seen.add(qsl_idx)
-    target_indices.append(qsl_idx)
-
-    pred_data = np.frombuffer(bytes.fromhex(pred["data"]), eval_dtype)
-    if pred_data[0] > 32000 or pred_data[0] < 0:
-      pred_data = np.concatenate([[1], pred_data[1:]])
-
-    gen_tok_len += len(pred_data)
-    preds_token_ids.append(pred_data)
-
-  # Batch decode predictions
-  preds_decoded = tokenizer.batch_decode(preds_token_ids, skip_special_tokens=True)
-  return preds_decoded, target_indices, gen_tok_len
+  pass
 
 
 def postprocess_text(pred, target):

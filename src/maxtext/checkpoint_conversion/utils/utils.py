@@ -62,13 +62,7 @@ DEFAULT_MAX_SHARD_SIZE = 1024 * 1024 * 1024 * 3  # 3GB default
 
 def _get_local_directory(output_dir: str) -> str:
   """Determines the local directory for saving files."""
-  if output_dir.startswith("gs://") or output_dir.startswith("hf://"):
-    # Fallback to a generic temp directory name if used directly
-    local_dir = os.path.join(os.path.expanduser("~"), ".cache", "maxtext_hf_conversion_temp", "temp_files")
-  else:
-    local_dir = output_dir
-  os.makedirs(local_dir, exist_ok=True)
-  return local_dir
+  pass
 
 
 def validate_and_filter_param_map_keys(param_map_keys, maxtext_state_keys):
@@ -709,43 +703,7 @@ def upload_folder_to_gcs(local_folder: str, gs_bucket_path: str, num_workers: in
       gs_bucket_path: GCS destination (e.g. "gs://my-bucket/images" or "my-bucket/images")
       num_workers: Number of parallel upload workers
   """
-  start_time = time.time()
-
-  # Standardize bucket path format
-  gs_bucket_path = gs_bucket_path.removeprefix("gs://")
-  bucket_name = gs_bucket_path.split("/")[0]
-  destination_dir = gs_bucket_path[len(bucket_name) :]
-  if destination_dir.startswith("/"):
-    destination_dir = destination_dir[1:]
-  # Ensure destination ends with "/"
-  if destination_dir != "" and not destination_dir.endswith("/"):
-    destination_dir += "/"
-
-  # Get files to upload
-  files_in_local_folder = os.listdir(local_folder)
-  # Set up GCS client
-  storage_client = Client()
-  bucket = storage_client.bucket(bucket_name)
-
-  # Upload files in parallel
-  results = transfer_manager.upload_many_from_filenames(
-      bucket,
-      files_in_local_folder,
-      source_directory=local_folder,
-      max_workers=num_workers,
-      blob_name_prefix=destination_dir,
-      timeout=600,
-      deadline=None,
-  )
-
-  # Report results
-  for name, result in zip(files_in_local_folder, results):
-    if isinstance(result, Exception):
-      max_logging.log(f"Failed to upload {name}: {result}")
-    else:
-      max_logging.log(f"✅ Uploaded {name} to {bucket.name}/{destination_dir}{name}")
-
-  max_logging.log(f"Upload completed in {time.time() - start_time}s")
+  pass
 
 
 def print_ram_usage(stage=""):
@@ -773,25 +731,7 @@ class MemoryMonitorTqdm(tqdm):
       **extra_kwargs,
   ):
     """Override to add memory usage info to the postfix."""
-    # Get memory info
-    memory = psutil.virtual_memory()
-    used_gb = memory.used / (1024**3)
-    total_gb = memory.total / (1024**3)
-    memory_percent = memory.percent
-
-    # Create memory postfix
-    memory_info = f"RAM: {used_gb:.1f}/{total_gb:.1f}GB ({memory_percent:.1f}%)"
-
-    # Add memory info to postfix
-    if postfix:
-      if isinstance(postfix, dict):
-        postfix["memory"] = memory_info
-      else:
-        postfix = f"{postfix}, {memory_info}"
-    else:
-      postfix = memory_info
-
-    return super().format_meter(n=n, total=total, elapsed=elapsed, postfix=postfix, **extra_kwargs)
+    pass
 
 
 def load_orbax_checkpoint(config) -> dict:

@@ -440,30 +440,7 @@ def add_data_to_sharding(mesh, path, aval, sharding):
   Raises:
     AssertionError: If sharding is not NamedSharding or shape cannot be sharded
   """
-  if not isinstance(sharding, jax.sharding.NamedSharding):
-    raise AssertionError(f"Expected NamedSharding, found {sharding} of {type(sharding)=} at {jax.tree_util.keystr(path)}")
-  try:
-    sharded_shape = sharding.shard_shape(aval.shape)
-  except Exception as e:
-    raise AssertionError(f"Could not shard {jax.tree_util.keystr(path)} of shape={aval.shape} with {sharding=}") from e
-  pspec = sharding.spec
-
-  if "data" in jax.tree.leaves(pspec):
-    return sharding
-
-  for idx, (size, partition) in enumerate(zip(sharded_shape, pspec)):
-    if partition is None:
-      partition = ()
-
-    if isinstance(partition, str):
-      partition = (partition,)
-
-    if size % mesh.shape["data"] == 0 and (partition is None or "tensor" not in partition):
-      added_component = ("data",) + partition
-      new_pspec = jax.sharding.PartitionSpec(*(pspec[:idx] + (added_component,) + pspec[idx + 1 :]))
-      new_sharding = jax.sharding.NamedSharding(sharding.mesh, new_pspec)
-      return new_sharding
-  return sharding
+  pass
 
 
 def maybe_update_params_sharding_with_opt(config, state_mesh_shardings):
@@ -599,10 +576,6 @@ def maybe_update_params_sharding_with_opt_nnx(
   )
   mu_lookup = {path: mu_var.get_value() for path, mu_var in mu_leaves_with_paths}
 
-  def _update_model_var(path, var):
-    if path in mu_lookup:
-      return var.replace(mu_lookup[path])
-    return var
 
   new_model_shardings = jax.tree_util.tree_map_with_path(
       _update_model_var, model_shardings, is_leaf=lambda x: isinstance(x, nnx.Variable)
@@ -624,18 +597,7 @@ def logical_axis_rules_pp_act_as_dp(logical_rules):
   """Add stage as a physical axes before data for each rule, so stage acts just like data instead of PP.
   This is used when we want to pipeline only a subset of layers, and leave the rest like DP.
   """
-  new_rules = []
-  for key, physical_axes in logical_rules:
-    if isinstance(physical_axes, str):
-      physical_axes = (physical_axes,)
-    else:
-      physical_axes = tuple(physical_axes)
-    new_physical_axes = tuple(axis for axis in physical_axes if axis != "stage")
-    if "data" in new_physical_axes:
-      data_idx = new_physical_axes.index("data")
-      new_physical_axes = new_physical_axes[0:data_idx] + ("stage",) + new_physical_axes[data_idx:]
-    new_rules.append((key, new_physical_axes))
-  return tuple(new_rules)
+  pass
 
 
 def get_formatted_sharding_annotations(params, mesh=None):
@@ -707,27 +669,7 @@ def remove_fsdp_sharding(sharding_tree):
 
   def _remove_fsdp_from_partition_spec(named_sharding):
     """Removes 'fsdp' and 'fsdp_transpose' from a PartitionSpec."""
-    if isinstance(named_sharding, jax.sharding.NamedSharding):
-      new_spec = []
-      # Iterate through each axis in the original PartitionSpec.
-      for axis in named_sharding.spec:
-        if axis is None:
-          new_spec.append(None)
-        elif isinstance(axis, str):
-          # If the axis is 'fsdp', replace it with None to signify replication.
-          if axis not in ("fsdp", "fsdp_transpose"):
-            new_spec.append(axis)
-          else:
-            new_spec.append(None)
-        elif isinstance(axis, (list, tuple)):
-          # If the axis is a collection, filter out 'fsdp'.
-          new_axis = [a for a in axis if a not in ("fsdp", "fsdp_transpose")]
-          new_spec.append(tuple(new_axis))
-        else:
-          raise ValueError(f"Unsupported_axis_type: {type(axis)}")
-        # Return a new sharding object with the modified spec.
-      return jax.sharding.NamedSharding(named_sharding.mesh, jax.sharding.PartitionSpec(*new_spec))
-    return named_sharding
+    pass
 
   return jax.tree.map(_remove_fsdp_from_partition_spec, sharding_tree)
 

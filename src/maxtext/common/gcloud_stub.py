@@ -201,8 +201,6 @@ def _gcs_stubs():  # pragma: no cover - simple no-op placeholders
     def exists(self):
       return False
 
-    def download_as_string(self):
-      return b"{}"
 
   class _StubListPages:
     """Stub for iterable pages returned by list_blobs."""
@@ -263,49 +261,12 @@ def gcs_storage():
 
 def _goodput_stubs():
   """Return stubs for ml_goodput_measurement integration."""
-
-  class _StubGoodputRecorder:
-    """Recorder stub exposing no-op methods and disabled flag."""
-
-    def __init__(self, *a, **k):  # pylint: disable=unused-argument
-      self.enabled = False
-
-    def __getattr__(self, name):
-      def _noop(*_a, **_k):
-        pass
-
-      return _noop
-
-  class _StubMonitoringOptions:
-    """Stub monitoring options container."""
-
-    def __init__(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-  class _StubGoodputMonitor:
-    """Stub goodput monitor with no-op uploader methods."""
-
-    def __init__(self, *a, **_k):  # pylint: disable=unused-argument
-      pass
-
-    def start_goodput_uploader(self):
-      print("[DECOUPLED NO-OP] goodput uploader skipped.")
-
-    def start_step_deviation_uploader(self):
-      print("[DECOUPLED NO-OP] goodput step deviation uploader skipped.")
-
-  monitoring_ns = SimpleNamespace(GCPOptions=_StubMonitoringOptions, GoodputMonitor=_StubGoodputMonitor)
-  goodput_ns = SimpleNamespace(GoodputRecorder=_StubGoodputRecorder)
-  return goodput_ns, monitoring_ns, True
+  pass
 
 
 def goodput_modules():
   """Return real goodput modules or stubs when missing and decoupled."""
 
-  def _import():
-    from ml_goodput_measurement import goodput, monitoring  # type: ignore  # pylint: disable=import-outside-toplevel
-
-    return goodput, monitoring, False
 
   return _import_or_stub(
       _import,
@@ -322,58 +283,7 @@ __all__ = ["is_decoupled", "jetstream", "gcs_storage", "goodput_modules"]
 
 def _monitoring_stubs():  # pragma: no cover - simple placeholders
   """Return stub implementations for Cloud Monitoring APIs."""
-
-  class GoogleAPIError(Exception):
-    """Stub GoogleAPIError mirroring the real exception name."""
-
-  class _StubMonitoringV3:
-    """Dummy monitoring module providing minimal types."""
-
-    class TimeSeries:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-    class Point:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-    class TimeInterval:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-    class TypedValue:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-    class MetricServiceClient:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-      def create_time_series(self, *a, **k):  # pylint: disable=unused-argument
-        return False
-
-  class _StubMetricPB2:
-    """Dummy metric_pb2 module namespace."""
-
-    class Metric:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-  class _StubMonitoredResourcePB2:
-    """Dummy monitored_resource_pb2 module namespace."""
-
-    class MonitoredResource:
-
-      def __init__(self, *a, **k):  # pylint: disable=unused-argument
-        del a, k
-
-  return _StubMonitoringV3(), _StubMetricPB2(), _StubMonitoredResourcePB2(), GoogleAPIError, True
+  pass
 
 
 def monitoring_modules():
@@ -383,12 +293,6 @@ def monitoring_modules():
   re-raise.
   """
 
-  def _import():  # Attempt real imports first
-    from google.cloud import monitoring_v3  # type: ignore  # pylint: disable=import-outside-toplevel
-    from google.api import metric_pb2, monitored_resource_pb2  # type: ignore  # pylint: disable=import-outside-toplevel
-    from google.api_core.exceptions import GoogleAPIError  # type: ignore  # pylint: disable=import-outside-toplevel
-
-    return monitoring_v3, metric_pb2, monitored_resource_pb2, GoogleAPIError, False
 
   return _import_or_stub(_import, _monitoring_stubs, label="monitoring", stub_if_decoupled=False)
 
@@ -400,20 +304,7 @@ __all__.append("monitoring_modules")
 
 def _workload_monitor_stub():  # pragma: no cover - simple placeholder
   """Return stub GCPWorkloadMonitor implementation and stub flag."""
-
-  class GCPWorkloadMonitor:
-    """Stub of GCPWorkloadMonitor exposing no-op methods."""
-
-    def __init__(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-    def start_heartbeat_reporting_thread(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-    def start_performance_reporting_thread(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-  return GCPWorkloadMonitor, True
+  pass
 
 
 def workload_monitor():
@@ -422,10 +313,6 @@ def workload_monitor():
   If decoupled OR import fails, returns stub class; otherwise real class.
   """
 
-  def _import():
-    from maxtext.common.gcp_workload_monitor import GCPWorkloadMonitor  # type: ignore  # pylint: disable=import-outside-toplevel
-
-    return GCPWorkloadMonitor, False
 
   return _import_or_stub(
       _import,
@@ -443,18 +330,7 @@ __all__.append("workload_monitor")
 
 def _vertex_tb_stub():  # pragma: no cover - simple placeholder
   """Return stub VertexTensorboardManager implementation and stub flag."""
-
-  class VertexTensorboardManager:
-    """Stub VertexTensorboardManager with no-op configure method."""
-
-    def __init__(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-    def configure_vertex_tensorboard(self, *a, **k):  # pylint: disable=unused-argument
-      # NO-OP in decoupled / missing dependency mode
-      print("[DECOUPLED NO-OP] skipping Vertex Tensorboard configuration.")
-
-  return VertexTensorboardManager, True
+  pass
 
 
 def vertex_tensorboard_modules():
@@ -463,10 +339,6 @@ def vertex_tensorboard_modules():
   Decoupled or missing dependency -> stub class with no-op configure method.
   """
 
-  def _import():
-    from maxtext.common.vertex_tensorboard import VertexTensorboardManager  # type: ignore  # pylint: disable=import-outside-toplevel
-
-    return VertexTensorboardManager, False
 
   return _import_or_stub(
       _import,
@@ -487,27 +359,7 @@ __all__.append("vertex_tensorboard_components")
 
 def _mldiagnostics_stub():  # pragma: no cover - simple placeholder
   """Return stub for google_cloud_mldiagnostics."""
-
-  class _StubXprof:
-    """Stub of mldiag.xprof context manager."""
-
-    def __init__(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-    def __enter__(self):
-      return self
-
-    def __exit__(self, *a, **k):  # pylint: disable=unused-argument
-      pass
-
-  class _StubMldiag:
-    """Stub of mldiag module."""
-
-    def xprof(self, *a, **k):  # pylint: disable=unused-argument
-      """Return a stub context manager."""
-      return _StubXprof()
-
-  return _StubMldiag(), True
+  pass
 
 
 def mldiagnostics_modules():
@@ -516,10 +368,6 @@ def mldiagnostics_modules():
   If decoupled OR import fails, returns stub object; otherwise real module.
   """
 
-  def _import():
-    import google_cloud_mldiagnostics as mldiag  # type: ignore  # pylint: disable=import-outside-toplevel
-
-    return mldiag, False
 
   return _import_or_stub(
       _import,
